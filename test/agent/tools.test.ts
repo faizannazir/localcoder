@@ -117,27 +117,35 @@ test("write_file creates new files but refuses overwrite without the last-resort
     assert.equal(refused.ok, false);
     assert.match(refused.error!, /apply_patch/);
     assert.equal(readFileSync(path.join(repo.root, "calc.js"), "utf8"), CALC_BUGGY);
+    chmodSync(path.join(repo.root, "calc.js"), 0o755);
     assert.ok((await call("write_file", { path: "calc.js", content: "// rewritten\n", allow_overwrite: true })).ok);
+    if (process.platform !== "win32") assert.equal(statSync(path.join(repo.root, "calc.js")).mode & 0o777, 0o755);
     assert.equal((await call("write_file", { path: "huge.txt", content: "x".repeat(600_000) })).ok, false);
   } finally { repo.cleanup(); }
 });
 
-test("write_file ignores a pre-existing temporary symlink and preserves file permissions", async () => {
+test("write_file ignores a pre-existing temporary symlink", async (t) => {
   const outside = mkdtempSync(path.join(os.tmpdir(), "lc-write-outside-"));
   const repo = await makeRepo();
   try {
     const target = path.join(repo.root, "calc.js");
     const outsideFile = path.join(outside, "outside.txt");
     writeFileSync(outsideFile, "outside content");
-    symlinkSync(outsideFile, `${target}.lc-tmp-${process.pid}`);
-    chmodSync(target, 0o755);
+    try { symlinkSync(outsideFile, `${target}.lc-tmp-${process.pid}`); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform === "win32" && (code === "EPERM" || code === "EACCES")) {
+        t.skip("Windows requires Developer Mode or elevated permission to create symlinks");
+        return;
+      }
+      throw error;
+    }
     const { call } = rt(repo);
     const result = await call("write_file", { path: "calc.js", content: "// updated\n", allow_overwrite: true });
     assert.equal(result.ok, true);
     assert.equal(readFileSync(outsideFile, "utf8"), "outside content");
     assert.equal(readFileSync(target, "utf8"), "// updated\n");
     assert.equal(lstatSync(target).isSymbolicLink(), false);
-    if (process.platform !== "win32") assert.equal(statSync(target).mode & 0o777, 0o755);
   } finally { repo.cleanup(); rmSync(outside, { recursive: true, force: true }); }
 });
 
