@@ -183,6 +183,7 @@
     ],
     "estimated_memory_gb": 20.0,
     "capabilities": [
+      "fim",
       "tool_calling",
       "long_context"
     ]

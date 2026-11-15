@@ -103,3 +103,12 @@ test("autocomplete rejects a registry without a fill-in-middle model", () => {
   assert.ok(isRejection(decision));
   if (isRejection(decision)) assert.equal(decision.reason, "no_model_for_task");
 });
+
+test("the shipped Qwen Coder 32B entry remains available for FIM when installed alone", async () => {
+  const { loadRegistry } = await import("../../src/router/registry");
+  const model = loadRegistry().find((entry) => entry.model_id === "qwen2.5-coder-32b-q4")!;
+  assert.ok(model, "the shipped coding model must exist");
+  const decision = new DefaultModelRouter().route("autocomplete", fakePolicy({ memory_budget_gb: 32 }), [model]);
+  assert.equal(isRejection(decision), false);
+  if (!isRejection(decision)) assert.equal(decision.model_id, model.model_id);
+});
