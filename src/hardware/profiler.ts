@@ -37,7 +37,7 @@ export class HardwareProfiler implements IHardwareProfiler {
     const mod = platformModule(platform);
 
     const ram_total_gb = os.totalmem() / 1024 ** 3;
-    const ram_available_gb = os.freemem() / 1024 ** 3;
+    const ram_available_gb = (platform === "macos" ? macos.readAvailableMemory() : os.freemem()) / 1024 ** 3;
     const os_reserve_gb =
       platform === "windows" ? windows.OS_RESERVE_GB : platform === "macos" ? macos.OS_RESERVE_GB : linux.OS_RESERVE_GB;
 

@@ -1,9 +1,33 @@
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import os from "os";
 import type { ThermalState, Confidence, GpuBackend } from "../types/index";
 
 /** macOS reserves the most: unified memory is shared with WindowServer and the GPU. */
 export const OS_RESERVE_GB = 2.0;
+
+/** Available memory includes reclaimable file-backed pages, excluding anonymous and wired memory. */
+export function parseAvailableMemory(vmStat: string): number | null {
+  const pageSizeMatch = vmStat.match(/\(page size of\s+(\d+)\s+bytes\)/);
+  const freeMatch = vmStat.match(/^Pages free:\s+(\d+)\.\s*$/m);
+  const fileBackedMatch = vmStat.match(/^File-backed pages:\s+(\d+)\.\s*$/m);
+  if (!pageSizeMatch || !freeMatch || !fileBackedMatch) return null;
+  const pageSize = Number(pageSizeMatch[1]);
+  const freePages = Number(freeMatch[1]);
+  const fileBackedPages = Number(fileBackedMatch[1]);
+  if (!Number.isSafeInteger(pageSize) || pageSize <= 0 || !Number.isSafeInteger(freePages) || !Number.isSafeInteger(fileBackedPages)) return null;
+  // vm_stat already excludes speculative pages from "Pages free". File-backed pages include that cache.
+  const available = (freePages + fileBackedPages) * pageSize;
+  return Number.isSafeInteger(available) ? available : null;
+}
+
+export function readAvailableMemory(): number {
+  try {
+    const vmStat = execFileSync("/usr/bin/vm_stat", [], { timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).toString();
+    const available = parseAvailableMemory(vmStat);
+    if (available !== null) return Math.min(available, os.totalmem());
+  } catch { /* unavailable probe: retain the conservative free-memory reading */ }
+  return os.freemem();
+}
 
 /**
  * Real thermal-pressure data on macOS comes from `powermetrics`, which requires sudo —
