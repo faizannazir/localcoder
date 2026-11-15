@@ -1,10 +1,33 @@
-# Phase 2 Checkpoint Validation — 2026-10-28
+# Verification
+
+## Verified on 2026-11-15
+
+The current source passed clean dependency installation, strict type-checking, compilation, and the complete automated suite on macOS ARM64 with llama.cpp build `b12241`.
+
+| Runtime | Tests | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- |
+| Node.js 25.9.0 | 153 | 151 | 0 | 2 |
+| Node.js 22.23.5 | 153 | 151 | 0 | 2 |
+
+The two skipped checks required enough live memory for CLI verification and model-loaded server shutdown. The actual resource policy rejected their synthetic model under the observed memory budget. Other real-engine checks exercised GGUF loading, tokenization, chat, fill-in-middle, quantized KV caches, the HTTP API, and backend process cleanup.
+
+The security and reliability regressions cover temporary-file symlinks, protected-path case variants, concurrent model loads, active request leases, partial undo retries, descendant-process timeouts, body-size limits, request validation, disconnected streams, and abandoned queued agent requests. Request validation also passed 12 consecutive focused runs comprising 60 test cases after an intermittent reset was corrected.
+
+The built CLI was started on an ephemeral localhost port and checked using real HTTP requests. Model and resource requests returned `200`, malformed JSON returned `400`, an untrusted origin returned `403`, and a chat request without installed models returned `503` with the registration command. SIGTERM exited successfully and closed the listening port.
+
+A disposable JavaScript project was indexed and queried through the built CLI. Symbol search found `add`, and context assembly included its implementation and test within a 4096-token budget. README and documentation links were checked after directory and file renaming.
+
+An eight-lens code review and focused follow-up completed with zero remaining actionable findings. The fixes were committed and pushed individually to `main` in the private repository.
+
+The generated GGUF fixtures use random weights. Trained-model coding quality and execution on Windows and Linux remain unverified in this run. The historical records below retain their original environment-specific findings.
+
+## Historical record from 2026-10-28
 
 ## Result
 
 **Real inference is BLOCKED in this validation environment.** No `llama-server` executable or GGUF model is present. No real-model task was attempted, and no model-quality, TTFT, tokens/sec, or agent-task success claims are made.
 
-This report records checks performed against the supplied `localcoder-checkpoint.zip`. It does not overwrite the separate historical real-server results documented in `TECHNICAL-NOTES.md` under Phase 2.2; those used a different environment and a random-weight fixture model, not a coding model.
+This report records checks performed against the supplied `localcoder-checkpoint.zip`. It does not overwrite the separate historical real-server results documented in `TECHNICAL-NOTES.md` under Real inference verification; those used a different environment and a random-weight fixture model, not a coding model.
 
 ## Environment observed
 
