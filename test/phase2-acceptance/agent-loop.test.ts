@@ -4,7 +4,8 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import path from "path";
 import type { AgentEvent } from "../../src/types/index";
 import { EstimatingTokenCounter } from "../../src/context/token-counter";
-import { AgentStateStore } from "../../src/agent/state";
+import { AgentStateStore, newState } from "../../src/agent/state";
+import { hashText, storeBackup } from "../../src/agent/workdir";
 import { ScriptedBackend, makeAgent, makeRepo, collect, fixScript, PLAN_JSON, CALC_BUGGY, CALC_FIXED, POLICY, DECISION } from "./helpers";
 
 const types = (evs: AgentEvent[]) => evs.map((e) => e.type);
@@ -303,6 +304,77 @@ test("undo: restores the original content, refreshes the index, is idempotent, a
     assert.ok(!existsSync(path.join(repo2.root, "docs", "NOTE.md")));
     assert.equal(await repo2.store.getFile("docs/NOTE.md"), null);
   } finally { repo2.cleanup(); }
+});
+
+test("undo: retries a partial rollback without conflicting with files already restored or touching later user changes", async () => {
+  const repo = await makeRepo();
+  try {
+    const store = new AgentStateStore(repo.root);
+    const state = newState("partial undo", "undo-test");
+    for (const name of ["calc.js", "util.js"]) {
+      const original = readFileSync(path.join(repo.root, name), "utf8");
+      state.edits.push({ path: name, op: "replace", before_hash: hashText(original), after_hash: hashText("agent edit"), backup_ref: storeBackup(repo.root, original), step: state.edits.length });
+      writeFileSync(path.join(repo.root, name), "agent edit");
+    }
+    store.save(state); // an older state has no per-edit undo progress
+    writeFileSync(path.join(repo.root, "calc.js"), "user conflict");
+    const undo = () => makeAgent(repo, new ScriptedBackend(() => "")).undo(state.task_id);
+    const first = await undo();
+    assert.deepEqual(first.restored, ["util.js"]);
+    assert.deepEqual(first.conflicts.map((c) => c.path), ["calc.js"]);
+    writeFileSync(path.join(repo.root, "util.js"), "user change after rollback");
+    writeFileSync(path.join(repo.root, "calc.js"), "agent edit");
+    const retry = await undo();
+    assert.deepEqual(retry.conflicts, []);
+    assert.deepEqual(retry.restored, ["calc.js"]);
+    assert.equal(calc(repo.root), CALC_BUGGY);
+    assert.equal(readFileSync(path.join(repo.root, "util.js"), "utf8"), "user change after rollback");
+    assert.equal((await undo()).already_undone, true);
+  } finally { repo.cleanup(); }
+});
+
+test("undo: a conflict in the newest edit prevents older edits to the same file from running", async () => {
+  const repo = await makeRepo();
+  try {
+    const store = new AgentStateStore(repo.root);
+    const state = newState("same file undo", "undo-test");
+    const middle = "intermediate edit";
+    state.edits = [
+      { path: "calc.js", op: "replace", before_hash: hashText(CALC_BUGGY), after_hash: hashText(middle), backup_ref: storeBackup(repo.root, CALC_BUGGY), step: 1 },
+      { path: "calc.js", op: "replace", before_hash: hashText(middle), after_hash: hashText(CALC_FIXED), backup_ref: storeBackup(repo.root, middle), step: 2 },
+    ];
+    store.save(state);
+    // This matches the older record's after hash, but the newer edit still conflicts.
+    writeFileSync(path.join(repo.root, "calc.js"), middle);
+    const first = await makeAgent(repo, new ScriptedBackend(() => "")).undo(state.task_id);
+    assert.equal(first.conflicts.length, 1);
+    assert.equal(calc(repo.root), middle);
+    writeFileSync(path.join(repo.root, "calc.js"), CALC_FIXED);
+    const retry = await makeAgent(repo, new ScriptedBackend(() => "")).undo(state.task_id);
+    assert.deepEqual(retry.conflicts, []);
+    assert.equal(calc(repo.root), CALC_BUGGY);
+  } finally { repo.cleanup(); }
+});
+
+test("undo: resumes index refresh after a restored file without repeating its disk edit", async () => {
+  const repo = await makeRepo();
+  try {
+    const store = new AgentStateStore(repo.root);
+    const state = newState("index failure undo", "undo-test");
+    state.edits = [{ path: "calc.js", op: "replace", before_hash: hashText(CALC_BUGGY), after_hash: hashText(CALC_FIXED), backup_ref: storeBackup(repo.root, CALC_BUGGY), step: 1 }];
+    store.save(state);
+    writeFileSync(path.join(repo.root, "calc.js"), CALC_FIXED);
+    const original = repo.indexService.handleEvent.bind(repo.indexService);
+    repo.indexService.handleEvent = async () => { throw new Error("index temporarily unavailable"); };
+    const first = await makeAgent(repo, new ScriptedBackend(() => "")).undo(state.task_id);
+    assert.equal(first.conflicts.length, 1);
+    assert.equal(calc(repo.root), CALC_BUGGY);
+    repo.indexService.handleEvent = original;
+    const retry = await makeAgent(repo, new ScriptedBackend(() => "")).undo(state.task_id);
+    assert.deepEqual(retry.conflicts, []);
+    assert.equal((await repo.store.getFile("calc.js"))!.content, CALC_BUGGY);
+    assert.equal(store.load(state.task_id).undone, true);
+  } finally { repo.cleanup(); }
 });
 
 test("memory persistence: completion writes a compact session summary + task record (never transcripts or file contents)", async () => {

@@ -545,16 +545,40 @@ export class CodingAgent implements ICodingAgent {
     const st = this.d.stateStore.load(taskId);
     const res: UndoResult = { task_id: taskId, restored: [], deleted: [], conflicts: [], already_undone: false };
     if (st.undone) { res.already_undone = true; return res; }
+    const blocked = new Set<string>();
     for (const e of [...st.edits].reverse()) {
+      if (e.undo_status === "done" || blocked.has(e.path)) continue;
       const c = this.sandbox.resolve(e.path, true);
-      if (!c.ok) { res.conflicts.push({ path: e.path, reason: c.reason }); continue; }
-      const cur = existsSync(c.abs) && statSync(c.abs).isFile() ? readFileSync(c.abs, "utf8") : null;
-      if (cur === null && e.before_hash === null) continue; // created then already removed
-      if (!opts.force && (cur === null || hashText(cur) !== e.after_hash)) { res.conflicts.push({ path: e.path, reason: "file changed since the agent edited it; use force to override" }); continue; }
-      if (e.backup_ref === null) { if (existsSync(c.abs)) unlinkSync(c.abs); if (!res.deleted.includes(e.path)) res.deleted.push(e.path); await this.d.indexService?.handleEvent({ type: "deleted", path: e.path }); }
-      else { writeAtomic(c.abs, loadBackup(this.d.root, e.backup_ref)); if (!res.restored.includes(e.path)) res.restored.push(e.path); await this.d.indexService?.handleEvent({ type: "modified", path: e.path }); }
+      if (!c.ok) { res.conflicts.push({ path: e.path, reason: c.reason }); blocked.add(e.path); continue; }
+      try {
+        const cur = existsSync(c.abs) && statSync(c.abs).isFile() ? readFileSync(c.abs, "utf8") : null;
+        const currentHash = cur === null ? null : hashText(cur);
+        const alreadyRestored = e.undo_status === "pending" && currentHash === e.before_hash;
+        const alreadyDeleted = cur === null && e.before_hash === null;
+        if (!opts.force && !alreadyRestored && !alreadyDeleted && currentHash !== e.after_hash) {
+          res.conflicts.push({ path: e.path, reason: "file changed since the agent edited it; use force to override" });
+          blocked.add(e.path);
+          continue;
+        }
+        e.undo_status = "pending";
+        this.d.stateStore.save(st);
+        if (e.backup_ref === null) {
+          if (existsSync(c.abs)) unlinkSync(c.abs);
+          if (!res.deleted.includes(e.path)) res.deleted.push(e.path);
+          await this.d.indexService?.handleEvent({ type: "deleted", path: e.path });
+        } else {
+          if (!alreadyRestored) writeAtomic(c.abs, loadBackup(this.d.root, e.backup_ref));
+          if (!res.restored.includes(e.path)) res.restored.push(e.path);
+          await this.d.indexService?.handleEvent({ type: "modified", path: e.path });
+        }
+        e.undo_status = "done";
+        this.d.stateStore.save(st);
+      } catch (err) {
+        res.conflicts.push({ path: e.path, reason: (err as Error).message });
+        blocked.add(e.path);
+      }
     }
-    if (res.conflicts.length === 0) { st.undone = true; st.status = st.status === "done" ? "done" : st.status; }
+    if (res.conflicts.length === 0) st.undone = true;
     this.d.stateStore.save(st);
     return res;
   }

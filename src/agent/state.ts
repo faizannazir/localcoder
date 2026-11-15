@@ -28,6 +28,8 @@ export interface EditRecord {
   after_hash: string;
   backup_ref: string | null;
   step: number;
+  /** Persist rollback intent before touching disk, then completion after index refresh. */
+  undo_status?: "pending" | "done";
 }
 
 export interface ProposedEdit {
