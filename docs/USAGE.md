@@ -12,12 +12,12 @@ localcoder verify [--model <file.gguf>] [--llama-server <path>] [--skip-agent] [
 (During development without a build step, prefix these with `npx tsx src/cli/index.ts` instead of `localcoder`, e.g. `npx tsx src/cli/index.ts doctor`.)
 
 - **`serve`** — starts the local API server. Defaults to the real `llama-server` backend on port 8080; pass `--backend mock` to exercise the full pipeline with stub responses instead (no model download needed).
-- **`doctor`** — one-shot diagnostic: detected hardware, computed memory budget, chosen power mode, whether `llama-server` is on `PATH`, and which registered model (if any) would currently be selected.
-- **`models`** — lists every entry in `registry/models.json` with its size, context window, and whether the GGUF file is actually present on disk yet.
+- **`doctor`** — one-shot diagnostic: detected hardware, computed memory budget, chosen power mode, the engine path resolved from configuration or `PATH`, and which registered model (if any) would currently be selected.
+- **`models`** — lists the shipped and user-registered models with its size, context window, and whether the GGUF file is actually present on disk yet.
 
 ## API
 
-All four Phase 0 endpoints are plain HTTP against `http://127.0.0.1:8080` (or whatever `--port` you chose).
+The HTTP endpoints are available at `http://127.0.0.1:8080` (or the configured `--port`).
 
 **List available models:**
 ```bash
@@ -62,23 +62,24 @@ Because the API is OpenAI-compatible, tools like **Continue**, **Aider**, **Clin
 http://127.0.0.1:8080/v1
 ```
 
-(API key field can be left blank or set to any placeholder value — Phase 0 doesn't require auth for localhost use.)
+Set the client API key to `LOCALCODER_API_TOKEN` when bearer authentication is enabled.
 
-## Known Phase 0 limitations (by design, not oversights)
+## Runtime behavior
 
-- **No power-mode override flag yet.** The Policy Engine picks a power mode automatically from hardware state; a `--power-mode` CLI flag / request override is planned for Phase 3, not Phase 0.
-- **No agent, no repository awareness.** `/v1/chat/completions` is a single-shot completion — there's no multi-step tool-calling loop yet (that's `CodingAgent`, Phase 2) and no project context assembly (that's `ContextManager`, Phase 1).
-- **KV-cache size estimates are rough.** The router's memory-safety math uses a simple heuristic (see `src/router/router.ts`), not a real per-architecture calculation — documented as a known follow-up, not silently assumed accurate.
-- **Windows and macOS thermal readings are always `"unknown"`.** Neither platform has a reliable non-elevated thermal API; rather than fake a number from CPU load, the Policy Engine treats `"unknown"` exactly like `"fair"` (a real, tested behavior — see `test/core/thermal-policy.test.ts`).
+- Resource policy selects the power mode automatically from hardware readings.
+- Chat and FIM endpoints perform inference. Repository context and tool execution are provided through the coding agent and workspace CLI commands.
+- KV-cache budgeting uses architecture metadata from GGUF files when available and a documented estimate for entries with incomplete metadata.
+- Windows and macOS thermal readings use `unknown` with low confidence. Policy treats that reading conservatively as `fair`.
+- POST bodies require JSON, have a 1 MiB limit, and validate generation parameters. Requested output tokens are capped to routing policy.
 
 ## Troubleshooting
 
 - **"llama-server not found on PATH"** — see [INSTALL.md](INSTALL.md) §3, or set `LOCALCODER_LLAMA_SERVER_BIN`.
 - **"Model file not found: models/..."** — the registry entry is a placeholder until you download the actual GGUF; see [MODELS.md](MODELS.md).
 - **Every request gets a 503 memory rejection** — run `localcoder doctor` to see your actual memory budget and what each model needs. On very constrained machines (under ~4GB free), even the smallest registered model may not fit; see MODELS.md for lighter options or adjust `registry/models.json`.
-- **`npm run build` shows `@types/node`-related errors** — run `npm install` first; those errors mean the dev dependency hasn't been fetched yet, not a code bug.
+- **Build or type-check failures** — confirm Node.js 22.13 or newer, run `npm ci`, and rerun `npm run typecheck` and `npm run build`.
 
-## Repository intelligence & memory (Phase 1)
+## Repository intelligence and memory
 
 ```bash
 localcoder index .                 # full index once (stored in ./.localcoder/index.sqlite)
@@ -87,14 +88,17 @@ localcoder symbols "TenantResolver"
 localcoder search "resolve tenant"
 localcoder context "fix token expiry" --file src/auth.ts --symbol validate --explain
 localcoder memory add architecture "Hexagonal; ports in src/ports" src/ports/index.ts
-localcoder memory list | status | refresh <id> "<text>" | delete <id>
+localcoder memory list
+localcoder memory status
+localcoder memory refresh <id> "<text>"
+localcoder memory delete <id>
 localcoder task new "Harden validator" "Add charset checks" src/auth.ts
 localcoder context "continue"      # resumes the active task without replaying any chat
 ```
 
 `context` prints layers, raw vs optimized tokens, cache hit rate, stale memory skipped, and (with `--explain`) why each item was included or excluded. Token counts from the CLI are **estimated**. `.env`, keys, `.ssh` etc. are never indexed or stored in memory. Needs Node >= 22.13 (built-in SQLite; it prints an ExperimentalWarning).
 
-## Coding agent (Phase 2)
+## Coding agent
 
 ```bash
 localcoder index .                                  # optional; the agent indexes once if the repo has no index yet
@@ -115,4 +119,4 @@ HTTP: `POST /v1/agent/run {"task": "...", "session_id"?, "resume_task_id"?}` str
 
 Without a configured test command the agent can only do a built-in syntax check (JS/Python) and will report `verification: syntax_only` or `none` — it does not claim the change is tested.
 
-**Try it for real** (the one thing this build could not do): install `llama-server`, download a model from `registry/models.json` that fits `localcoder doctor`, then run `localcoder agent "<small task>"` in a throwaway git repo and review the printed diff. Expect small local models to sometimes produce invalid edit JSON; the agent retries once, then stops with a resumable error.
+**Evaluate a trained model.** install `llama-server`, download a model from `registry/models.json` that fits `localcoder doctor`, then run `localcoder agent "<small task>"` in a throwaway git repo and review the printed diff. Expect small local models to sometimes produce invalid edit JSON; the agent retries once, then stops with a resumable error.

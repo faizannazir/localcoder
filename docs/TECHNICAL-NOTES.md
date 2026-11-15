@@ -34,7 +34,7 @@ None of these changes alter the spec's intent — each one either makes an exist
 
 ---
 
-# Phase 1 + Adaptive Context & Memory — Notes
+# Repository Intelligence and Persistent Memory
 
 ## What is real vs. substituted (read this first)
 
@@ -78,7 +78,7 @@ Python extractor treated blank lines as dedent (methods after a blank line becam
 
 ---
 
-# Phase 2 — Coding Agent Core
+# Coding Agent
 
 ## Definition-of-Done status (read first)
 
@@ -122,7 +122,7 @@ Phase 0's unused `AgentEvent`/`CodingAgent` placeholders were reshaped (`AgentEv
 
 ---
 
-# Phase 2.1 — Real-backend readiness (no new mocks)
+# Inference Backend Integration
 
 > **Partly superseded by Phase 2.2 below**: a real `llama-server` (build 11392) has since been run. The "Not verified" list in this section is corrected there.
 
@@ -156,7 +156,7 @@ Tested: GGUF reader on spec-conformant byte fixtures (all scalar/array/nested ty
 
 ---
 
-# Phase 2.2 — Verified against a real llama-server (build 11392)
+# Real inference verification with llama-server build 11392
 
 A real `llama-server` (llama.cpp build 11392, Linux x64 CPU, supplied by the project owner) was available for this phase. **No real coding model was** (the Hugging Face URL returns 403 from the build environment and the file was not uploaded), so everything below used a random-weight GGUF written by `scripts/tiny-model.ts`. That file is real and loads in the real server; its output is gibberish, so **no claim about coding quality, JSON compliance, agent success, tokens/second or real-model memory is made.**
 
@@ -181,8 +181,17 @@ The coding model file itself (e.g. `Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf`, ~1
 
 ---
 
-# Phase 2.3 — Checkpoint revalidation in a fresh sandbox (2026-10-28)
+# Verification record from 2026-10-28
 
-See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the commands and complete observed results. This environment differs from the Phase 2.2 environment above: it has no `llama-server` binary or GGUF weights. `doctor` ran from the compiled CLI and reported Linux x86_64, Node 22.16.0, 5.81 GB RAM, and a 3.04 GB safe budget. `verify` exited 2 before inference and correctly identified both missing prerequisites.
+See [`docs/VERIFICATION.md`](VERIFICATION.md) for the commands and complete observed results. This environment differs from the Phase 2.2 environment above: it has no `llama-server` binary or GGUF weights. `doctor` ran from the compiled CLI and reported Linux x86_64, Node 22.16.0, 5.81 GB RAM, and a 3.04 GB safe budget. `verify` exited 2 before inference and correctly identified both missing prerequisites.
 
 The full suite could not be rerun here: `npm test` stopped because `tsx` is absent; `npm install` timed out and produced no `node_modules`. The globally installed TypeScript 5.8.3 also cannot provide a clean build without the project's declared Node type dependencies. Therefore this checkpoint run **does not independently reconfirm** the historical test counts in the sections above. No real-model inference or coding-task result is claimed for this environment.
+
+
+## Security and reliability verification
+
+Atomic file replacement uses an exclusively created temporary file and preserves existing permissions. Protected paths are matched consistently across case variants. Model residency changes are serialized, and active requests hold a lease until their generation finishes or is cancelled.
+
+Undo journals persist rollback progress per edit so partial conflicts and interrupted index refreshes can be retried. HTTP cancellation begins when the request is accepted and propagates through queued agent work and upstream inference streams. Command timeouts terminate the subprocess tree and bound pipe cleanup.
+
+On macOS, available-memory estimation includes free and reclaimable file-backed pages from `vm_stat`. Anonymous, wired, and compressed pages stay outside this estimate. Failed probes retain the conservative free-memory fallback. The existing operating-system reserve and model-routing safety margins still apply.

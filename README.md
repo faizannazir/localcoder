@@ -1,75 +1,161 @@
-# localcoder — Phase 0
+# LocalCoder
 
-A hardware-aware local coding agent platform. This is the **Phase 0 vertical slice**: a real, runnable server + CLI that proves the core memory-safety and routing model works, before any of the agent/repository-intelligence layers get built on top of it.
+LocalCoder runs a local coding assistant backed by llama.cpp. It combines hardware-aware model routing, a streaming HTTP API, repository search, persistent project memory, and a coding agent that edits files and runs configured checks.
 
-> This implements the Phase 0 scope exactly as locked in `implementation-spec.md` (§7): `HardwareProfiler → PolicyEngine → static ModelRegistry → ModelRouter → ModelManager → llama-server`, and nothing more. No agent, no repository index, no embeddings, no speculative decoding, no distillation, no trained classifier — those are later phases, on purpose.
+## Features
 
-## What this actually does
+- Routes tasks to installed GGUF models according to memory, battery, and thermal policy.
+- Manages llama-server processes, model residency, and concurrent inference requests.
+- Streams chat responses and fill-in-middle code completions over HTTP.
+- Indexes repository files in SQLite and extracts JavaScript, TypeScript, and Python symbols with heuristic parsers.
+- Assembles context within a token budget using search results, project memory, task state, and cached summaries.
+- Applies targeted edits, runs validation, saves interrupted tasks, and supports conflict-aware undo.
 
-- Detects your machine's real RAM/CPU/GPU/battery/thermal state and computes a **safe** memory budget (not just "how much RAM is free")
-- Picks the right coding model for the task from a registry of real current models — and **refuses cleanly** rather than crashing if nothing fits
-- Runs inference through **`llama-server`** (the real llama.cpp server, not a simulation) as a managed child process
-- Serves an OpenAI-compatible local API: `GET /v1/models`, `GET /v1/resource`, `POST /v1/chat/completions`, `POST /v1/completions` (fill-in-middle autocomplete)
-- A `doctor` command that tells you exactly what it detected and why it picked (or rejected) a model
+## Install
 
-## Quick start
+Use **Node.js 22.13 or newer** and npm. From the repository root, install dependencies and build the CLI.
 
 ```bash
-npm install
+npm ci
 npm run build
-
-# See what your machine looks like and what model it would pick
-npm run doctor    # or: node dist/cli/index.js doctor
-
-# Download a model and install llama-server first — see docs/MODELS.md
-npm run serve     # starts the real server on http://127.0.0.1:8080
+node dist/cli/index.js --help
+node dist/cli/index.js doctor
 ```
 
-Don't have a model downloaded yet, or just want to see the plumbing work first? Run with the mock backend — it exercises the entire classify → route → load → generate → stream pipeline without needing any GGUF weights or `llama-server` binary, returning clearly-labeled stub responses:
+The `doctor` command reports the hardware profile, resource policy, and model routing decisions. LocalCoder calculates a conservative memory budget before loading a model. On macOS, the available-memory estimate includes reclaimable file cache. Requests receive an HTTP `503` when every candidate exceeds the budget.
+
+Real inference requires a compatible GGUF model and the platform-specific llama-server binary. Extract the full llama.cpp release archive so its companion libraries remain beside the executable. Register a downloaded model, then start the server.
 
 ```bash
-npm run serve:mock
+export LOCALCODER_LLAMA_SERVER_BIN=/absolute/path/to/llama-server
+node dist/cli/index.js models add /absolute/path/to/model.gguf
+node dist/cli/index.js models
+node dist/cli/index.js serve --port 8080
 ```
 
-Full instructions: **[cross-platform setup guide](docs/SETUP-WINDOWS-LINUX-MAC.md)** · **[docs/INSTALL.md](docs/INSTALL.md)** · **[docs/USAGE.md](docs/USAGE.md)** · **[docs/MODELS.md](docs/MODELS.md)**
+Registered models are recorded in `~/.localcoder/models.local.json`. Set `LOCALCODER_HOME` to choose another user-data directory. The server uses the current working directory as its repository workspace and listens on `127.0.0.1`.
 
-## Why "real, not mock" matters here
+For Windows commands, engine downloads, and model sizing, follow the setup and model guides. [Platform setup](docs/SETUP-WINDOWS-LINUX-MAC.md) · [Installation](docs/INSTALL.md) · [Models](docs/MODELS.md)
 
-The `LlamaCppBackend` is the actual production path: it spawns real `llama-server` processes, speaks its real HTTP API (`/health`, `/v1/chat/completions`, `/infill`, `/tokenize`), and streams real generated tokens. `MockInferenceBackend` exists purely so the request pipeline can be tested and demoed without a multi-gigabyte model download — it is never the default (`serve` uses the real backend unless you explicitly pass `--backend mock`), and every response it returns is prefixed `[mock:...]` so it's never mistaken for a real completion.
+## Run with the mock backend
 
-## Repo layout
+The mock backend returns responses labeled `[mock:...]` and exercises request routing and streaming without downloading an engine or model. It uses the same resource-policy gate.
 
+```bash
+node dist/cli/index.js serve --backend mock --port 8080
 ```
+
+## HTTP API
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/v1/models` | Model registry, installation status, and residency |
+| GET | `/v1/resource` | Hardware profile, resource policy, and available repository statistics |
+| POST | `/v1/chat/completions` | Stream chat responses |
+| POST | `/v1/completions` | Stream fill-in-middle completions from `prefix` and `suffix` |
+| POST | `/v1/agent/run` | Run or resume a coding task and stream its events |
+| POST | `/v1/agent/undo` | Undo edits from a saved task |
+
+Chat uses OpenAI-style server-sent events and ends with `data: [DONE]`. Fill-in-middle requires a model with FIM support and accepts `prefix` and `suffix` fields.
+
+```bash
+curl -N http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Write a function that adds two numbers."}],"max_tokens":64}'
+
+curl -N http://127.0.0.1:8080/v1/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"prefix":"function add(a, b) {\n  return ","suffix":"\n}","max_tokens":32}'
+```
+
+POST requests require JSON. Set `LOCALCODER_API_TOKEN` to require bearer authentication. Browser origins and additional Host headers can be configured with `LOCALCODER_ALLOWED_ORIGINS` and `LOCALCODER_ALLOWED_HOSTS`. [CLI and API usage](docs/USAGE.md)
+
+## Work with a repository
+
+Run workspace commands from the repository you want to inspect or edit. Point `LOCALCODER_CLI` to this project's built CLI before changing directories.
+
+```bash
+LOCALCODER_CLI=/absolute/path/to/localcoder/dist/cli/index.js
+cd /absolute/path/to/your-project
+
+node "$LOCALCODER_CLI" index .
+node "$LOCALCODER_CLI" search "add"
+node "$LOCALCODER_CLI" symbols "add"
+node "$LOCALCODER_CLI" context "add" --budget 4096 --explain
+node "$LOCALCODER_CLI" memory status
+```
+
+Indexes, memory, saved agent tasks, and edit backups live under the workspace's `.localcoder/` directory. `index . --watch` explicitly starts incremental updates. Context output identifies estimated token counts.
+
+With a suitable local model available, the agent can inspect the repository, propose targeted edits, and run validation.
+
+```bash
+node "$LOCALCODER_CLI" agent "Fix the add function so its tests pass" --session arithmetic
+node "$LOCALCODER_CLI" agent "continue"
+node "$LOCALCODER_CLI" undo
+```
+
+The agent discovers `test`, `lint`, and `build` scripts from `package.json`. Configure targeted checks and formatting in `.localcoder/agent.json` when needed. The `{file}` placeholder receives a validated workspace path.
+
+```json
+{
+  "test": ["node", "--test"],
+  "test_target": ["node", "--test", "{file}"],
+  "timeout_ms": 120000
+}
+```
+
+Each run reports its verification level. Undo checks for later file changes and preserves completed rollback progress across retries. Project commands execute with the current user's permissions. The path jail and command allowlist operate at the application level, and repository scripts can access resources available to that user.
+
+## Verify and test
+
+Run the automated checks from the LocalCoder repository root.
+
+```bash
+npm run typecheck
+npm run build
+npm test
+```
+
+Set `LOCALCODER_LLAMA_SERVER_BIN` to include real llama.cpp integration tests. Those tests generate small random-weight GGUF fixtures to validate model loading, tokenization, streaming, cache settings, and process cleanup. Model-quality evaluation requires a trained model. Tests that need unavailable engine components or more live memory report a skip.
+
+The `verify` command checks your installed engine and model, then attempts a coding task in a disposable repository. It writes a JSON report and returns an exit code of `0` for success, `1` for failed checks, or `2` for missing components.
+
+```bash
+node dist/cli/index.js verify
+npm run bench:index
+npm run bench:context
+```
+
+The benchmarks use synthetic repositories and print measurements for the current machine. Stored verification documents describe the environment and results from their recorded run. [Verification notes](docs/VERIFICATION.md) · [Historical verification report](docs/verification-report.json)
+
+## Repository layout
+
+```text
 src/
-  types/       Locked Phase 0 interfaces (implementation-spec.md §2) — the source of truth
-  hardware/    HardwareProfiler + linux/windows/macos-specific probes
-  policy/      Policy Engine (RAM budget, thermal, battery → ResourcePolicy)
-  router/      Task classifier, model router, static registry loader
-  manager/     Model Manager (resource-aware residency & eviction)
-  inference/   LlamaCppBackend (real) and MockInferenceBackend (testing only)
-  server/      HTTP API + the 4 Phase 0 routes
-  cli/         localcoder serve / doctor / models
-registry/models.json   Static Phase 0 model registry
-test/phase0-acceptance/  Automated tests for AT-0.1 through AT-0.8
-docs/                  Install, usage, and model-download guides
+  agent/       Task execution, file tools, validation, and undo
+  cli/         Command-line entry points
+  context/     Context assembly and token accounting
+  hardware/    Platform hardware probes
+  index/       SQLite index, search, and symbol extraction
+  inference/   llama.cpp and mock backends, GGUF metadata
+  manager/     Model residency and request coordination
+  memory/      Project, task, and session memory
+  policy/      Resource policy
+  router/      Task classification and model selection
+  server/      HTTP server and routes
+  types/       Shared interfaces
+  util/        Paths and engine discovery
+test/
+  core/        Routing, hardware, and inference API checks
+  repository/  Indexing, search, and context tests
+  memory/      Persistent memory and context reuse tests
+  agent/       Editing, validation, recovery, and undo tests
+  inference/   GGUF and real-engine integration tests
+  server/      Request security and process lifecycle tests
+registry/      Shipped model metadata
+scripts/       Benchmarks and synthetic model generation
+docs/          Setup, usage, models, and verification records
 ```
 
-## Phase 1: repository intelligence + persistent memory
-
-Incremental SQLite index, symbol/text search, a 6-stage budget-aware Context Manager, and an adaptive layer (project/task/conversation memory, STALE marking, delta context, content-hash summary cache, metrics). **Symbol extraction is heuristic (TS/JS/Python), not Tree-sitter** — see NOTES.md for exactly what is real, substituted, measured, and not built.
-
-## Phase 2: coding agent
-
-`localcoder agent "<task>"` / `POST /v1/agent/run` (SSE) run a bounded PLAN → SEARCH → READ → REASON → EDIT → TEST → OBSERVE → FIX* → VERIFY loop over your repository using the local model, with a path-jailed, allowlisted tool runtime, targeted edits, smallest-validation-first testing, a persisted/resumable state, and `localcoder undo`. **Never verified against a real llama-server in this build environment** — see NOTES.md ("Phase 2") before trusting it with real work.
-
-## Making it real on your machine
-
-This repo needs two things it cannot download for you: a `llama-server` binary and a GGUF model (see `docs/MODELS.md`). Once you have them, `localcoder models add <file.gguf>` then `localcoder verify` runs the whole stack — inference, tokenizer, fill-in-middle, and the coding agent fixing a real bug in a throwaway repo — against the real server, and tells you precisely what failed or is missing.
-
-## Status
-
-Verified working (including live, on real constrained hardware — see the test suite and its comments): hardware detection, the memory-safety rejection gate, the full classify→route→load→generate→stream pipeline (mock backend), and all 19 automated acceptance tests. The `LlamaCppBackend` is implemented against llama.cpp's real, documented server API but needs a real `llama-server` + GGUF model on your machine to exercise end to end — see `docs/MODELS.md`.
-
-Three real interface bugs were found and fixed while building this against the spec (see `NOTES.md`): `tokenize`/`countTokens` had to become async, `ModelManager.ensure()` needed a `ResourcePolicy` parameter it was missing, and the "fair" thermal state needed a real measurable effect for the "unknown treated as fair" safety rule to be testable at all.
-
-License: Apache-2.0.
+Licensed under Apache-2.0. [License](LICENSE)
