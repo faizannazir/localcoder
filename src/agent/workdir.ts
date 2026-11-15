@@ -1,5 +1,5 @@
-import { createHash } from "crypto";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, renameSync, statSync, chmodSync } from "fs";
+import { createHash, randomBytes } from "crypto";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, renameSync, statSync, openSync, closeSync, fchmodSync, unlinkSync } from "fs";
 import path from "path";
 
 export const hashText = (t: string) => createHash("sha256").update(t).digest("hex");
@@ -33,10 +33,19 @@ export function storeOutput(root: string, text: string): string {
 
 export function writeAtomic(abs: string, content: string): void {
   mkdirSync(path.dirname(abs), { recursive: true });
-  const tmp = `${abs}.lc-tmp-${process.pid}`;
+  const tmp = `${abs}.lc-tmp-${randomBytes(16).toString("hex")}`;
   let mode: number | undefined;
   try { mode = statSync(abs).mode; } catch { /* new file */ }
-  writeFileSync(tmp, content);
-  if (mode !== undefined) chmodSync(tmp, mode & 0o777);
-  renameSync(tmp, abs);
+  const fd = openSync(tmp, "wx");
+  try {
+    try {
+      writeFileSync(fd, content);
+      if (mode !== undefined) fchmodSync(fd, mode & 0o777);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, abs);
+  } finally {
+    if (existsSync(tmp)) unlinkSync(tmp);
+  }
 }
