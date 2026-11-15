@@ -50,7 +50,7 @@ export async function runIndex(args: string[]): Promise<void> {
     });
     await new Promise(() => {}); // block forever until SIGINT
   } else {
-    console.log(`Incremental watcher: enabled (run with --watch to keep it running, or start "localcoder serve" against this repo)`);
+    console.log(`Index saved. Run index --watch to keep it updated.`);
     store.close();
   }
 }

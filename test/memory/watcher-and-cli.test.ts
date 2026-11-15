@@ -51,7 +51,9 @@ test("CLI end-to-end: index, symbols, search, memory add, context --explain, sec
   const root = mkdtempSync(path.join(os.tmpdir(), "localcoder-cli-"));
   try {
     writeFileSync(path.join(root, "tenant.ts"), "export class TenantResolver {\n  resolve(id: string) {\n    return id;\n  }\n}\n");
-    assert.match(run(root, "index", "."), /files: 1/);
+    const indexed = run(root, "index", ".");
+    assert.match(indexed, /files: 1/);
+    assert.doesNotMatch(indexed, /watcher: enabled/i);
     assert.match(run(root, "symbols", "TenantResolver"), /TenantResolver/);
     assert.match(run(root, "search", "resolve"), /tenant\.ts/);
     assert.match(run(root, "memory", "add", "architecture", "Tenants resolved per request", "tenant.ts"), /Added memory/);
