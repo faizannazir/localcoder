@@ -6,6 +6,11 @@ import { spawn, spawnSync } from "child_process";
 import os from "os";
 import path from "path";
 import type { AddressInfo } from "net";
+import { pathToFileURL } from "url";
+import { HardwareProfiler } from "../../src/hardware/profiler";
+import { DefaultPolicyEngine } from "../../src/policy/engine";
+import { DefaultModelRouter } from "../../src/router/router";
+import { isRejection } from "../../src/types/index";
 import { buildContext, createServer } from "../../src/server/index";
 import { securityFromEnv } from "../../src/server/security";
 import { resolveCommand, runCommand } from "../../src/agent/command-runner";
@@ -123,6 +128,62 @@ test("user data lives in LOCALCODER_HOME: `models add` writes there and `models`
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+const CLI = path.join(__dirname, "../../src/cli/index.ts");
+const TSX_LOADER = pathToFileURL(require.resolve("tsx")).href;
+
+function launchCli(args: string[], env: NodeJS.ProcessEnv) {
+  const child = spawn(process.execPath, ["--import", TSX_LOADER, CLI, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
+  let output = "";
+  child.stdout.on("data", (d) => { output += d; });
+  child.stderr.on("data", (d) => { output += d; });
+  child.on("error", (err) => { output += err.message; });
+  const closed = new Promise<number | null>((resolve) => child.once("close", resolve));
+  return { child, closed, output: () => output };
+}
+
+async function listeningPort(cli: ReturnType<typeof launchCli>): Promise<number> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const match = cli.output().match(/serving on http:\/\/127\.0\.0\.1:(\d+)/);
+    if (match) {
+      const port = Number(match[1]);
+      assert.ok(port > 0, "serve --port 0 must print the actual listening port");
+      return port;
+    }
+    assert.equal(cli.child.exitCode, null, cli.output());
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`CLI did not start within 10 seconds: ${cli.output()}`);
+}
+
+async function stopCli(cli: ReturnType<typeof launchCli>, signal: NodeJS.Signals): Promise<number | null> {
+  if (cli.child.exitCode !== null || cli.child.signalCode !== null) return cli.closed;
+  cli.child.kill(signal);
+  let timer: ReturnType<typeof setTimeout>;
+  try {
+    return await Promise.race([
+      cli.closed,
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`CLI did not exit: ${cli.output()}`)), 10_000); }),
+    ]);
+  } finally { clearTimeout(timer!); }
+}
+
+test("CLI lifecycle: serve --port 0 publishes its bound port and SIGTERM closes the server", { timeout: 30_000 }, async () => {
+  const home = mkdtempSync(path.join(os.tmpdir(), "lc-mock-life-"));
+  const cli = launchCli(["serve", "--backend", "mock", "--port", "0"], { ...process.env, LOCALCODER_HOME: home });
+  try {
+    const port = await listeningPort(cli);
+    const response = await fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, 200);
+    assert.ok(Array.isArray((await response.json() as { data: unknown[] }).data));
+    assert.equal(await stopCli(cli, "SIGTERM"), 0, cli.output());
+    await assert.rejects(() => fetch(`http://127.0.0.1:${port}/v1/models`, { signal: AbortSignal.timeout(2000) }));
+  } finally {
+    await stopCli(cli, "SIGKILL");
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 function findEngine(): string | null {
   const env = process.env.LOCALCODER_LLAMA_SERVER_BIN;
   if (env && existsSync(env)) return env;
@@ -131,32 +192,49 @@ function findEngine(): string | null {
 }
 const ENGINE = findEngine();
 const skip = ENGINE ? false : "no real llama-server available (set LOCALCODER_LLAMA_SERVER_BIN)";
-const running = (needle: string) => spawnSync("pgrep", ["-f", needle], { encoding: "utf8" }).stdout.trim().split("\n").filter(Boolean).length;
+const processIds = (needle: string) => (spawnSync("pgrep", ["-f", needle], { encoding: "utf8" }).stdout ?? "").trim().split("\n").filter(Boolean).map(Number);
 
-test("REAL lifecycle: SIGTERM on `localcoder serve` unloads the model and leaves NO llama-server process behind", { skip, timeout: 120_000 }, async () => {
+async function killModelProcesses(modelFile: string): Promise<void> {
+  for (const pid of processIds(modelFile)) {
+    try { process.kill(pid, "SIGKILL"); } catch { /* exited already */ }
+  }
+  const deadline = Date.now() + 5000;
+  while (processIds(modelFile).length > 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(processIds(modelFile).length, 0, "the temporary model's processes must be cleaned up");
+}
+
+test("REAL lifecycle: SIGTERM on `localcoder serve` unloads the model and leaves NO llama-server process behind", { skip, timeout: 120_000 }, async (t) => {
   const home = mkdtempSync(path.join(os.tmpdir(), "lc-life-"));
   const modelFile = path.join(home, "life-tiny-model.gguf");
-  writeTinyModel(modelFile);
-  writeFileSync(path.join(home, "models.local.json"), JSON.stringify([entryFromGguf(modelFile)]));
-  const port = 9000 + Math.floor(Math.random() * 500);
-  const tsx = spawnSync("which", ["tsx"], { encoding: "utf8" }).stdout.trim() || "tsx";
-  const child = spawn(tsx, [path.join(__dirname, "../../src/cli/index.ts"), "serve", "--port", String(port)], { env: { ...process.env, LOCALCODER_HOME: home, LOCALCODER_LLAMA_SERVER_BIN: ENGINE! }, stdio: ["ignore", "pipe", "pipe"] });
-  let out = "";
-  child.stdout.on("data", (d) => (out += d)); child.stderr.on("data", (d) => (out += d));
+  let cli: ReturnType<typeof launchCli> | undefined;
   try {
-    const t0 = Date.now();
-    while (!out.includes("serving on") && Date.now() - t0 < 30_000) await new Promise((r) => setTimeout(r, 100));
-    assert.ok(out.includes("serving on"), out);
-    const r = await raw(port, "POST", "/v1/chat/completions", { Host: `127.0.0.1:${port}`, "Content-Type": "application/json" }, JSON.stringify({ messages: [{ role: "user", content: "hi" }], max_tokens: 3 }));
-    assert.equal(r.status, 200, r.body);
-    assert.ok(running(modelFile) >= 1, "a real llama-server is running while the model is loaded");
-    const exited = new Promise<number | null>((res) => child.once("exit", (c) => res(c)));
-    child.kill("SIGTERM");
-    const code = await Promise.race([exited, new Promise<string>((res) => setTimeout(() => res("timeout"), 20_000))]);
-    assert.equal(code, 0, `serve should exit cleanly on SIGTERM, got ${code}. Output:\n${out.slice(-500)}`);
-    await new Promise((r) => setTimeout(r, 500));
-    assert.equal(running(modelFile), 0, "no orphaned llama-server after shutdown");
-  } finally { child.kill("SIGKILL"); spawnSync("pkill", ["-f", modelFile]); rmSync(home, { recursive: true, force: true }); }
+    writeTinyModel(modelFile);
+    const model = entryFromGguf(modelFile);
+    const profile = await new HardwareProfiler().sample();
+    const policy = new DefaultPolicyEngine().derive(profile);
+    const decision = new DefaultModelRouter().route("chat_simple", policy, [model]);
+    if (isRejection(decision)) {
+      t.skip(`live memory budget ${policy.memory_budget_gb}GB cannot hold the tiny model safely`);
+      return;
+    }
+    writeFileSync(path.join(home, "models.local.json"), JSON.stringify([model]));
+    cli = launchCli(["serve", "--port", "0"], { ...process.env, LOCALCODER_HOME: home, LOCALCODER_LLAMA_SERVER_BIN: ENGINE! });
+    const port = await listeningPort(cli);
+    const r = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], max_tokens: 3 }), signal: AbortSignal.timeout(75_000),
+    });
+    assert.equal(r.status, 200, await r.text());
+    assert.ok(processIds(modelFile).length >= 1, "a real llama-server is running while the model is loaded");
+    assert.equal(await stopCli(cli, "SIGTERM"), 0, cli.output());
+    assert.equal(processIds(modelFile).length, 0, "no orphaned llama-server after shutdown");
+  } finally {
+    try { if (cli) await stopCli(cli, "SIGKILL"); }
+    finally {
+      try { await killModelProcesses(modelFile); }
+      finally { rmSync(home, { recursive: true, force: true }); }
+    }
+  }
 });
 
 test("REAL lifecycle: if the Node process exits abruptly, the exit hook kills the llama-server it spawned", { skip, timeout: 90_000 }, async () => {
@@ -175,9 +253,14 @@ test("REAL lifecycle: if the Node process exits abruptly, the exit hook kills th
       process.exit(0);
     })();`);
   try {
-    const r = spawnSync("npx", ["tsx", script], { encoding: "utf8", timeout: 60_000 });
+    const r = spawnSync(process.execPath, ["--import", TSX_LOADER, script], { encoding: "utf8", timeout: 60_000 });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /LOADED \d+/, r.stdout + r.stderr);
-    await new Promise((res) => setTimeout(res, 800));
-    assert.equal(running(modelFile), 0, "llama-server must not outlive the process that spawned it");
-  } finally { spawnSync("pkill", ["-f", modelFile]); rmSync(d, { recursive: true, force: true }); }
+    const deadline = Date.now() + 5000;
+    while (processIds(modelFile).length > 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(processIds(modelFile).length, 0, "llama-server must not outlive the process that spawned it");
+  } finally {
+    await killModelProcesses(modelFile);
+    rmSync(d, { recursive: true, force: true });
+  }
 });

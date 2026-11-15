@@ -154,14 +154,18 @@ export async function serve(opts: ServeOptions = {}): Promise<{ port: number; cl
   const server = createServer(ctx);
   const port = opts.port ?? 8080;
 
-  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
+  });
 
   return {
-    port,
+    port: (server.address() as import("net").AddressInfo).port,
     close: async () => {
-      await ctx.modelManager.unloadAll(); // never leave llama-server children behind
-      (server as any).closeAllConnections?.();
-      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+      const stopped = new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+      server.closeAllConnections();
+      try { await ctx.modelManager.unloadAll(); }
+      finally { await stopped; ctx.indexStore?.close(); }
     },
   };
 }
