@@ -6,6 +6,7 @@ import path from "path";
 import type { AddressInfo } from "net";
 import { buildContext, createServer } from "../../src/server/index";
 import { LlamaCppBackend } from "../../src/inference/llama-cpp-backend";
+import { MockInferenceBackend } from "../../src/inference/mock-backend";
 import { FAKE_PROFILE } from "../agent/helpers";
 
 test("disconnecting stalled chat and FIM streams releases their backend leases for shutdown", { skip: process.platform === "win32" ? "POSIX executable fixture" : false, timeout: 20_000 }, async () => {
@@ -71,7 +72,6 @@ test("an agent disconnected while queued never opens its workspace session", { t
   }]));
   let releaseLoad!: () => void;
   const loading = new Promise<void>((resolve) => { releaseLoad = resolve; });
-  const { MockInferenceBackend } = await import("../../src/inference/mock-backend");
   class WaitingBackend extends MockInferenceBackend {
     async load(...args: Parameters<MockInferenceBackend["load"]>) { await loading; await super.load(...args); }
   }
