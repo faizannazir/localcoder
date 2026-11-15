@@ -4,7 +4,7 @@ For the complete, copy-paste setup for **Windows, Linux, and macOS**, including 
 
 ## Prerequisites
 
-- **Node.js 22.5 or newer** and npm.
+- **Node.js 22.13 or newer** and npm.
 - The LocalCoder repository (clone it or extract its ZIP).
 - For real inference: a platform-matched `llama-server` executable and at least one compatible `.gguf` model file. LocalCoder does not download either automatically.
 

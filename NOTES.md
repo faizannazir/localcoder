@@ -40,7 +40,7 @@ None of these changes alter the spec's intent — each one either makes an exist
 
 | Requirement | Status |
 |---|---|
-| SQLite persistence | **Real** — Node's built-in `node:sqlite` (experimental in Node 22; needs Node >= 22.5). Zero npm deps. |
+| SQLite persistence | **Real** — Node's built-in `node:sqlite` (experimental in Node 22; needs Node >= 22.13). Zero npm deps. |
 | Tree-sitter parsing | **NOT implemented.** Tree-sitter grammars are native addons needing network `npm install`, unavailable in this build environment. Shipped a regex/indentation **heuristic** extractor behind the spec's `Parser`/`SymbolExtractor` interfaces. Languages extracted: TypeScript, JavaScript, Python only. C#/C/C++/Rust/Go are *detected* (indexed for text search) but yield **no symbols**. A real TreeSitterParser is a drop-in replacement. |
 | ripgrep | **Not used** (not installed here). Text search uses a built-in scanner over indexed content; the rg fast-path is **not implemented**, only the fallback. Fine at measured scale (see below); revisit for very large repos. |
 | Rename detection | fs.watch cannot distinguish renames; the watcher reports delete+create. `IndexService` handles an explicit `renamed` event and the delete+create pair reaches the same end state. Content-hash rename correlation is not implemented. |

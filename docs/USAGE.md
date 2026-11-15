@@ -92,7 +92,7 @@ localcoder task new "Harden validator" "Add charset checks" src/auth.ts
 localcoder context "continue"      # resumes the active task without replaying any chat
 ```
 
-`context` prints layers, raw vs optimized tokens, cache hit rate, stale memory skipped, and (with `--explain`) why each item was included or excluded. Token counts from the CLI are **estimated**. `.env`, keys, `.ssh` etc. are never indexed or stored in memory. Needs Node >= 22.5 (built-in SQLite; it prints an ExperimentalWarning).
+`context` prints layers, raw vs optimized tokens, cache hit rate, stale memory skipped, and (with `--explain`) why each item was included or excluded. Token counts from the CLI are **estimated**. `.env`, keys, `.ssh` etc. are never indexed or stored in memory. Needs Node >= 22.13 (built-in SQLite; it prints an ExperimentalWarning).
 
 ## Coding agent (Phase 2)
 

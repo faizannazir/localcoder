@@ -6,7 +6,7 @@ This guide installs LocalCoder with a **real local model**. You need three thing
 
 ## 1. Requirements
 
-- **Node.js 22.5 or newer** and npm. Check with `node --version` and `npm --version`.
+- **Node.js 22.13 or newer** and npm. Check with `node --version` and `npm --version`.
 - Git, or a downloaded ZIP of the LocalCoder repository.
 - A few GB of free disk space for the repository, dependencies, engine archive, and model.
 - Internet access to download dependencies, the engine, and the model. Once downloaded, inference runs locally.

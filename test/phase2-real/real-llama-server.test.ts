@@ -38,7 +38,7 @@ const dir = mkdtempSync(path.join(os.tmpdir(), "lc-real-"));
 const MODEL = path.join(dir, "tiny-random-test-model.gguf");
 writeTinyModel(MODEL);
 const entry = entryFromGguf(MODEL);
-const decision = (kv: "f16" | "q8_0" = "f16"): RoutingDecision => ({ model_id: entry.model_id, ctx_window: 2048, kv_cache_budget_mb: 1, kv_cache_dtype: kv, max_output_tokens: 32, gpu_offload_fraction: 0 });
+const decision = (kv: "f16" | "q8_0" | "q4_0" = "f16"): RoutingDecision => ({ model_id: entry.model_id, ctx_window: 2048, kv_cache_budget_mb: 1, kv_cache_dtype: kv, max_output_tokens: 32, gpu_offload_fraction: 0 });
 
 test("REAL: the tiny GGUF we wrote is read by our parser with the right architecture facts", { skip }, () => {
   assert.deepEqual([entry.layers, entry.attention_heads, entry.kv_heads, entry.head_dim, entry.context_limit], [2, 4, 2, 16, 2048]);
