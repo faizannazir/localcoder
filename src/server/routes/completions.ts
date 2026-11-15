@@ -49,7 +49,7 @@ export async function handleCompletions(body: unknown, res: ServerResponse, ctx:
 
   const backend = lease.backend;
   try {
-    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
 
     try {
       for await (const tok of backend.generate(

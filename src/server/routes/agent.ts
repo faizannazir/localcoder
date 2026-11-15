@@ -29,7 +29,7 @@ export async function handleAgentRun(body: unknown, res: ServerResponse, ctx: Ap
     res.on("close", () => { aborted = true; });
     session = await openAgentSession({ root: ctx.repoRoot, backend, policy: pre.policy, decision: pre.decision, aborted: () => aborted });
 
-    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
     for await (const ev of session.agent.run({
       task: b.task, session_id: typeof b.session_id === "string" ? b.session_id : undefined,
       resume_task_id: typeof b.resume_task_id === "string" ? b.resume_task_id : undefined,

@@ -54,7 +54,6 @@ export async function handleChatCompletions(body: unknown, res: ServerResponse, 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      Connection: "keep-alive",
     });
 
     const created = Math.floor(Date.now() / 1000);
