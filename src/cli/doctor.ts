@@ -1,28 +1,18 @@
-import { execSync } from "child_process";
 import os from "os";
-import path from "path";
 import { HardwareProfiler } from "../hardware/profiler";
 import { DefaultPolicyEngine } from "../policy/engine";
 import { DefaultModelRouter } from "../router/router";
-import { loadRegistry, isDownloaded } from "../router/registry";
+import { loadFullRegistry, isDownloaded } from "../router/registry";
 import { isRejection } from "../types/index";
-
-function llamaServerOnPath(): boolean {
-  try {
-    execSync(process.platform === "win32" ? "where llama-server" : "which llama-server", { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { locateLlamaServer } from "../util/paths";
 
 export async function runDoctor(): Promise<void> {
   const profiler = new HardwareProfiler();
   const policyEngine = new DefaultPolicyEngine();
   const router = new DefaultModelRouter();
 
-  const baseDir = path.join(__dirname, "..", "..");
-  const registry = loadRegistry(path.join(baseDir, "registry", "models.json"));
+  const registry = loadFullRegistry();
+  const engine = locateLlamaServer();
 
   const profile = await profiler.sample();
   const policy = policyEngine.derive(profile);
@@ -43,7 +33,7 @@ export async function runDoctor(): Promise<void> {
   lines.push(`Power mode       ${policy.power_mode}`);
   lines.push(`Max context      ${policy.max_context_tokens} tokens`);
   lines.push(``);
-  lines.push(`llama-server     ${llamaServerOnPath() ? "found on PATH" : "NOT found on PATH — see docs/MODELS.md"}`);
+  lines.push(`llama-server     ${engine.path ? `found at ${engine.path}` : "NOT found — see docs/MODELS.md"}`);
   lines.push(``);
 
   if (isRejection(decision)) {
@@ -54,7 +44,7 @@ export async function runDoctor(): Promise<void> {
   } else {
     const entry = registry.find((e) => e.model_id === decision.model_id);
     lines.push(`Selected model   ${decision.model_id} (${entry?.parameter_count.total}B${entry?.parameter_count.active ? `, ${entry.parameter_count.active}B active` : ""}, ${entry?.quantization})`);
-    lines.push(`                   downloaded: ${entry ? isDownloaded(entry, baseDir) : false}`);
+    lines.push(`                   downloaded: ${entry ? isDownloaded(entry) : false}`);
     lines.push(`                   ctx window: ${decision.ctx_window}, kv dtype: ${decision.kv_cache_dtype}, gpu offload: ${(decision.gpu_offload_fraction * 100).toFixed(0)}%`);
   }
 
