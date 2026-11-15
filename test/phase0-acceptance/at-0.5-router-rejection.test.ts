@@ -97,3 +97,9 @@ test("AT-0.5: autocomplete prefers the smallest model with fim capability", () =
   assert.ok(!isRejection(decision));
   if (!isRejection(decision)) assert.equal(decision.model_id, "medium-fim", "should prefer the fim-capable model even though it's larger");
 });
+
+test("autocomplete rejects a registry without a fill-in-middle model", () => {
+  const decision = new DefaultModelRouter().route("autocomplete", fakePolicy(), [fakeEntry({ capabilities: ["tool_calling"] })]);
+  assert.ok(isRejection(decision));
+  if (isRejection(decision)) assert.equal(decision.reason, "no_model_for_task");
+});

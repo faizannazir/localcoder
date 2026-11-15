@@ -71,8 +71,7 @@ function candidatesFor(task: TaskClass, registry: ModelRegistryEntry[]): ModelRe
   switch (task) {
     case "autocomplete": {
       const withFim = registry.filter((e) => e.capabilities.includes("fim"));
-      const pool = withFim.length > 0 ? withFim : registry;
-      return [...pool].sort(byTotalParamsAsc);
+      return withFim.sort(byTotalParamsAsc);
     }
     case "chat_simple":
       return [...registry].sort(byTotalParamsAsc);
