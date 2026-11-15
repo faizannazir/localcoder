@@ -40,46 +40,42 @@ export async function handleChatCompletions(body: unknown, res: ServerResponse, 
     return;
   }
 
-  let loaded;
+  let lease;
   try {
-    loaded = await ctx.modelManager.ensure(decision, policy, task === "autocomplete" ? 10 : 5);
+    lease = await ctx.modelManager.acquire(decision, policy, task === "autocomplete" ? 10 : 5);
   } catch (err) {
     res.writeHead(502, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: { message: `Failed to load model "${decision.model_id}": ${(err as Error).message}` } }));
     return;
   }
 
-  const backend = ctx.modelManager.getBackend(loaded.model_id);
-  if (!backend) {
-    res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: { message: "Model reported resident but no backend handle was found (internal bug)." } }));
-    return;
-  }
-
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-  });
-
-  const created = Math.floor(Date.now() / 1000);
+  const backend = lease.backend;
   try {
-    for await (const tok of backend.generate(
-      { mode: "chat", messages: parsed.messages },
-      { max_tokens: parsed.max_tokens ?? decision.max_output_tokens, temperature: parsed.temperature, stop: parsed.stop }
-    )) {
-      const chunk = {
-        id: `chatcmpl-${created}`,
-        object: "chat.completion.chunk",
-        created,
-        model: decision.model_id,
-        choices: [{ index: 0, delta: tok.token ? { content: tok.token } : {}, finish_reason: tok.finish_reason ?? null }],
-      };
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+
+    const created = Math.floor(Date.now() / 1000);
+    try {
+      for await (const tok of backend.generate(
+        { mode: "chat", messages: parsed.messages },
+        { max_tokens: parsed.max_tokens ?? decision.max_output_tokens, temperature: parsed.temperature, stop: parsed.stop }
+      )) {
+        const chunk = {
+          id: `chatcmpl-${created}`,
+          object: "chat.completion.chunk",
+          created,
+          model: decision.model_id,
+          choices: [{ index: 0, delta: tok.token ? { content: tok.token } : {}, finish_reason: tok.finish_reason ?? null }],
+        };
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+    } catch (err) {
+      res.write(`data: ${JSON.stringify({ error: { message: (err as Error).message } })}\n\n`);
     }
-  } catch (err) {
-    res.write(`data: ${JSON.stringify({ error: { message: (err as Error).message } })}\n\n`);
-  }
-  res.write("data: [DONE]\n\n");
-  res.end();
+    res.write("data: [DONE]\n\n");
+    res.end();
+  } finally { lease.release(); }
 }

@@ -38,34 +38,30 @@ export async function handleCompletions(body: unknown, res: ServerResponse, ctx:
     return;
   }
 
-  let loaded;
+  let lease;
   try {
-    loaded = await ctx.modelManager.ensure(decision, policy, /* priority */ 10); // autocomplete defaults to high residency priority
+    lease = await ctx.modelManager.acquire(decision, policy, /* priority */ 10); // autocomplete defaults to high residency priority
   } catch (err) {
     res.writeHead(502, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: { message: `Failed to load model "${decision.model_id}": ${(err as Error).message}` } }));
     return;
   }
 
-  const backend = ctx.modelManager.getBackend(loaded.model_id);
-  if (!backend) {
-    res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: { message: "Model reported resident but no backend handle was found (internal bug)." } }));
-    return;
-  }
-
-  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-
+  const backend = lease.backend;
   try {
-    for await (const tok of backend.generate(
-      { mode: "fim", prefix: parsed.prefix, suffix: parsed.suffix ?? "" },
-      { max_tokens: parsed.max_tokens ?? decision.max_output_tokens, temperature: parsed.temperature ?? 0.2, stop: parsed.stop }
-    )) {
-      res.write(`data: ${JSON.stringify({ choices: [{ text: tok.token, finish_reason: tok.finish_reason ?? null }] })}\n\n`);
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+
+    try {
+      for await (const tok of backend.generate(
+        { mode: "fim", prefix: parsed.prefix, suffix: parsed.suffix ?? "" },
+        { max_tokens: parsed.max_tokens ?? decision.max_output_tokens, temperature: parsed.temperature ?? 0.2, stop: parsed.stop }
+      )) {
+        res.write(`data: ${JSON.stringify({ choices: [{ text: tok.token, finish_reason: tok.finish_reason ?? null }] })}\n\n`);
+      }
+    } catch (err) {
+      res.write(`data: ${JSON.stringify({ error: { message: (err as Error).message } })}\n\n`);
     }
-  } catch (err) {
-    res.write(`data: ${JSON.stringify({ error: { message: (err as Error).message } })}\n\n`);
-  }
-  res.write("data: [DONE]\n\n");
-  res.end();
+    res.write("data: [DONE]\n\n");
+    res.end();
+  } finally { lease.release(); }
 }

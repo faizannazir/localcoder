@@ -74,3 +74,41 @@ test("AT-0.7: eviction ranks by priority first, not by recency (i.e. it is not p
   const survivors = manager.resident().map((m) => m.model_id);
   assert.deepEqual(survivors, ["b"], 'the low-priority, more-recently-used "a" should be evicted before the high-priority "b" — proves this is priority-ranked, not LRU');
 });
+
+test("concurrent loads preserve the single-model cap and unload every backend", async () => {
+  const live = new Set<MockInferenceBackend>();
+  let loads = 0;
+  class SlowBackend extends MockInferenceBackend {
+    async load(entry: ModelRegistryEntry, decision: RoutingDecision) {
+      loads++;
+      await new Promise((r) => setTimeout(r, 10));
+      await super.load(entry, decision);
+      live.add(this);
+    }
+    async unload() { live.delete(this); await super.unload(); }
+  }
+  const manager = new DefaultModelManager(registry, () => new SlowBackend());
+  await Promise.all([manager.ensure(decisionFor("a"), lowMemPolicy()), manager.ensure(decisionFor("a"), lowMemPolicy())]);
+  assert.equal(loads, 1, "same-model requests share a single resident backend");
+  await Promise.all([manager.ensure(decisionFor("a"), lowMemPolicy()), manager.ensure(decisionFor("b"), lowMemPolicy())]);
+  assert.equal(live.size, 1);
+  assert.equal(manager.resident().length, 1);
+  await manager.unloadAll();
+  assert.equal(live.size, 0);
+});
+
+test("an active model lease prevents eviction until the request releases it", async () => {
+  const manager = new DefaultModelManager(registry, () => new MockInferenceBackend());
+  const first = await manager.acquire(decisionFor("a"), lowMemPolicy());
+  let acquired = false;
+  const second = manager.acquire(decisionFor("b"), lowMemPolicy()).then((lease) => { acquired = true; return lease; });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(acquired, false);
+  assert.equal(manager.getBackend("a"), first.backend);
+  first.release();
+  first.release(); // releasing twice cannot decrement another request's lease
+  const next = await second;
+  assert.equal(manager.resident()[0].model_id, "b");
+  next.release();
+  await manager.unloadAll();
+});

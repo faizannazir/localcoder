@@ -20,12 +20,11 @@ export async function handleAgentRun(body: unknown, res: ServerResponse, ctx: Ap
   if (!tryLockRepo(ctx.repoRoot)) return json(res, 409, { error: { message: "an agent run is already active for this repository" } });
   let session: Awaited<ReturnType<typeof openAgentSession>> | null = null;
   let aborted = false;
+  let lease: Awaited<ReturnType<AppContext["modelManager"]["acquire"]>> | undefined;
   try {
-    let loaded;
-    try { loaded = await ctx.modelManager.ensure(pre.decision, pre.policy, 8); }
+    try { lease = await ctx.modelManager.acquire(pre.decision, pre.policy, 8); }
     catch (err) { return json(res, 502, { error: { message: `Failed to load model "${pre.decision.model_id}": ${(err as Error).message}` } }); }
-    const backend = ctx.modelManager.getBackend(loaded.model_id);
-    if (!backend) return json(res, 500, { error: { message: "model resident but no backend handle (internal bug)" } });
+    const backend = lease.backend;
 
     res.on("close", () => { aborted = true; });
     session = await openAgentSession({ root: ctx.repoRoot, backend, policy: pre.policy, decision: pre.decision, aborted: () => aborted });
@@ -43,6 +42,7 @@ export async function handleAgentRun(body: unknown, res: ServerResponse, ctx: Ap
     else { res.write(`event: error\ndata: ${JSON.stringify({ type: "error", message: (err as Error).message, recoverable: false })}\n\n`); res.end(); }
   } finally {
     session?.close();
+    lease?.release();
     unlockRepo(ctx.repoRoot);
   }
 }

@@ -6,10 +6,35 @@ interface ResidentEntry {
   loaded: LoadedModel;
   backend: InferenceBackend;
   registryEntry: ModelRegistryEntry;
+  users: number;
+  idle: (() => void)[];
 }
 
 export class DefaultModelManager implements IModelManager {
   private residents = new Map<string, ResidentEntry>();
+  private operations: Promise<unknown> = Promise.resolve();
+
+  private exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.operations.then(operation);
+    this.operations = result.catch(() => {});
+    return result;
+  }
+
+  /** A request holds its backend until generation and tool use have finished. */
+  acquire(decision: RoutingDecision, policy: ResourcePolicy, priority = 0) {
+    return this.exclusive(async () => {
+      const loaded = await this.ensureResident(decision, policy, priority);
+      const entry = this.residents.get(loaded.model_id)!;
+      entry.users++;
+      let released = false;
+      return { loaded, backend: entry.backend, release: () => {
+        if (released) return;
+        released = true;
+        entry.users--;
+        if (entry.users === 0) for (const resolve of entry.idle.splice(0)) resolve();
+      } };
+    });
+  }
 
   constructor(
     private registry: ModelRegistryEntry[],
@@ -32,6 +57,10 @@ export class DefaultModelManager implements IModelManager {
   }
 
   async ensure(decision: RoutingDecision, policy: ResourcePolicy, priority = 0): Promise<LoadedModel> {
+    return this.exclusive(() => this.ensureResident(decision, policy, priority));
+  }
+
+  private async ensureResident(decision: RoutingDecision, policy: ResourcePolicy, priority: number): Promise<LoadedModel> {
     const existing = this.residents.get(decision.model_id);
     if (existing) {
       existing.loaded.last_used_at = new Date().toISOString();
@@ -40,10 +69,11 @@ export class DefaultModelManager implements IModelManager {
     }
 
     const entry = this.lookup(decision.model_id);
-    await this.evictIfNeeded(entry.estimated_memory_gb, policy);
+    await this.evictResidents(entry.estimated_memory_gb, policy);
 
     const backend = this.backendFactory();
-    await backend.load(entry, decision);
+    try { await backend.load(entry, decision); }
+    catch (error) { await backend.unload().catch(() => {}); throw error; }
 
     const loaded: LoadedModel = {
       model_id: decision.model_id,
@@ -52,19 +82,26 @@ export class DefaultModelManager implements IModelManager {
       last_used_at: new Date().toISOString(),
       priority,
     };
-    this.residents.set(decision.model_id, { loaded, backend, registryEntry: entry });
+    this.residents.set(decision.model_id, { loaded, backend, registryEntry: entry, users: 0, idle: [] });
     return loaded;
   }
 
   async unload(model_id: string): Promise<void> {
+    return this.exclusive(() => this.unloadResident(model_id));
+  }
+
+  private async unloadResident(model_id: string): Promise<void> {
     const r = this.residents.get(model_id);
     if (!r) return;
+    if (r.users > 0) await new Promise<void>((resolve) => r.idle.push(resolve));
     await r.backend.unload();
     this.residents.delete(model_id);
   }
 
   async unloadAll(): Promise<void> {
-    for (const id of [...this.residents.keys()]) await this.unload(id);
+    await this.exclusive(async () => {
+      for (const id of [...this.residents.keys()]) await this.unloadResident(id);
+    });
   }
 
   resident(): LoadedModel[] {
@@ -78,10 +115,14 @@ export class DefaultModelManager implements IModelManager {
    * single long session.
    */
   async evictIfNeeded(requiredGb: number, policy: ResourcePolicy): Promise<void> {
+    return this.exclusive(() => this.evictResidents(requiredGb, policy));
+  }
+
+  private async evictResidents(requiredGb: number, policy: ResourcePolicy): Promise<void> {
     const hardCapOne = policy.memory_budget_gb > 0 && policy.memory_budget_gb < LOW_MEMORY_RESIDENCY_CAP_GB;
 
     if (hardCapOne) {
-      for (const id of [...this.residents.keys()]) await this.unload(id);
+      for (const id of [...this.residents.keys()]) await this.unloadResident(id);
       return;
     }
 
@@ -94,7 +135,7 @@ export class DefaultModelManager implements IModelManager {
     while (this.residentTotalGb() + requiredGb > policy.memory_budget_gb && this.residents.size > 0) {
       const [victim] = rankedForEviction();
       if (!victim) break;
-      await this.unload(victim.loaded.model_id);
+      await this.unloadResident(victim.loaded.model_id);
     }
   }
 
