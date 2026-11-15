@@ -39,7 +39,11 @@ export async function handleCompletions(body: unknown, res: ServerResponse, ctx:
     res.writeHead(503, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
-        error: { message: "No registered model fits the current memory budget for autocomplete.", reason: decision.reason, attempted: decision.attempted },
+        error: { message: ctx.registry.length === 0
+          ? "No models are installed. Run `localcoder models add <file.gguf>`."
+          : decision.reason === "no_model_for_task"
+            ? "No installed model supports fill-in-middle autocomplete. Add a FIM-capable model with `localcoder models add <file.gguf>`."
+            : "No registered model fits the current memory budget for autocomplete.", reason: decision.reason, attempted: decision.attempted },
       })
     );
     return;

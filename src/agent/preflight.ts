@@ -23,7 +23,7 @@ export async function preflightAgent(
   }
   const decision = deps.router.route("hard_agent", policy, deps.registry);
   if (isRejection(decision)) {
-    return { ok: false, reason: decision.reason, message: deps.registry.length === 0 ? "No models are installed. Run `localcoder setup` (or `localcoder models add <file.gguf>`)." : "No registered model fits the current memory budget for an agent run.", attempted: decision.attempted };
+    return { ok: false, reason: decision.reason, message: deps.registry.length === 0 ? "No models are installed. Run `localcoder models add <file.gguf>`." : "No registered model fits the current memory budget for an agent run.", attempted: decision.attempted };
   }
   return { ok: true, policy, decision, profile };
 }

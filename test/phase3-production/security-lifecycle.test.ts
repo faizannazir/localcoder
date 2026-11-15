@@ -99,7 +99,7 @@ test("ROUTING: with the real engine only INSTALLED models are offered; with none
     try {
       const r = await raw(port, "POST", "/v1/chat/completions", { Host: `127.0.0.1:${port}`, "Content-Type": "application/json" }, CHAT);
       assert.equal(r.status, 503);
-      assert.match(r.body, /No models are installed\. Run `localcoder setup`/);
+      assert.match(r.body, /No models are installed\. Run `localcoder models add <file\.gguf>`/);
     } finally { (server as any).closeAllConnections?.(); await new Promise<void>((r) => server.close(() => r())); }
   } finally { rmSync(d, { recursive: true, force: true }); }
 });

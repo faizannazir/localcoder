@@ -58,7 +58,7 @@ export async function runModels(args: string[] = []): Promise<void> {
     quant: e.quantization,
     ctx: e.context_limit.toLocaleString(),
     est_gb: e.estimated_memory_gb.toFixed(1),
-    downloaded: isDownloaded(e) ? "yes" : "no — run `localcoder setup`",
+    downloaded: isDownloaded(e) ? "yes" : "no — run `localcoder models add <file.gguf>`",
   }));
   const w = (k: keyof (typeof rows)[0], min: number) => Math.max(min, ...rows.map((r) => r[k].length));
   const widths = { model_id: w("model_id", 8), params: w("params", 6), quant: w("quant", 5), ctx: w("ctx", 3), est_gb: w("est_gb", 6) };

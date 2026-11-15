@@ -36,7 +36,9 @@ export async function handleChatCompletions(body: unknown, res: ServerResponse, 
       JSON.stringify({
         error: {
           message:
-            decision.reason === "no_model_fits_budget"
+            ctx.registry.length === 0
+              ? "No models are installed. Run `localcoder models add <file.gguf>`."
+              : decision.reason === "no_model_fits_budget"
               ? "No registered model fits the current memory budget. Try closing other applications, switching to a lower power mode, or downloading a smaller model."
               : `No registered model supports task class "${task}".`,
           reason: decision.reason,
