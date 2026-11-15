@@ -18,7 +18,7 @@ export interface AgentSession {
 
 const activeRepos = new Set<string>();
 
-/** One agent run per repository per process (a cross-process lock is not implemented — see NOTES.md). */
+/** One agent run per repository per process (a cross-process lock is not implemented — see docs/TECHNICAL-NOTES.md). */
 export function tryLockRepo(root: string): boolean {
   const k = path.resolve(root);
   if (activeRepos.has(k)) return false;

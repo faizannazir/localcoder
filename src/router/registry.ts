@@ -19,7 +19,7 @@ export function loadRegistry(registryPath?: string): ModelRegistryEntry[] {
   const resolved = registryPath ?? path.join(__dirname, "..", "..", "registry", "models.json");
   if (!existsSync(resolved)) {
     throw new Error(
-      `Model registry not found at ${resolved}. Phase 0 expects a static registry/models.json — see docs/MODELS.md.`
+      `Model registry not found at ${resolved}. Expected registry/models.json — see docs/MODELS.md.`
     );
   }
 

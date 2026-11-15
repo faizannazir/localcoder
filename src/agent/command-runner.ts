@@ -16,7 +16,7 @@ const SAFE_WIN_ARG = /^[A-Za-z0-9_@+=:,.\/\\-]+$/;
 /**
  * Windows cannot spawn npm/npx/pnpm/yarn (.cmd shims) without a shell, and Node refuses to spawn .cmd files with shell:false.
  * For those four commands ONLY we use a shell, and only if every argument is a plain token (no spaces, quotes, % & | < > ^ ...),
- * so nothing can be injected. Everything else is spawned directly. NOT yet exercised on real Windows (see NOTES.md).
+ * so nothing can be injected. Everything else is spawned directly. NOT yet exercised on real Windows (see docs/TECHNICAL-NOTES.md).
  */
 export function resolveCommand(argv: string[], platform: string = process.platform): { command: string; args: string[]; shell: boolean } | { error: string } {
   if (platform === "win32" && WIN_SHIMS.has(argv[0].toLowerCase())) {

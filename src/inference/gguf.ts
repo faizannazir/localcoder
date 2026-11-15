@@ -176,7 +176,7 @@ function paramsFrom(label: string | undefined, fileName: string): { total: numbe
 /**
  * Builds a registry entry from a real GGUF. `estimated_memory_gb` is file size + ~8% (mmapped weights + small buffers):
  * an ESTIMATE until `localcoder verify` measures real RSS. Parameter count comes from the GGUF size label or filename,
- * falling back to a ~4.8 bits/weight guess from file size (labelled in NOTES.md).
+ * falling back to a ~4.8 bits/weight guess from file size (labelled in docs/TECHNICAL-NOTES.md).
  */
 export function entryFromGguf(file: string, meta: GgufMeta = readGgufMeta(file)): ModelRegistryEntry {
   const s = summarizeGguf(meta);

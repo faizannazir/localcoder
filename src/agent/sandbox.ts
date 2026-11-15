@@ -9,7 +9,7 @@ export type PathCheck = { ok: true; abs: string; rel: string } | { ok: false; re
  * Workspace jail for every agent file operation. Resolves symlinks on the nearest existing
  * ancestor (so a symlinked parent directory cannot smuggle a new file outside the root),
  * then applies the same secret-path rule the Phase 1 indexer uses. Application-level only:
- * there is NO OS-level sandbox (see NOTES.md).
+ * there is NO OS-level sandbox (see docs/TECHNICAL-NOTES.md).
  */
 export class Sandbox {
   readonly realRoot: string;

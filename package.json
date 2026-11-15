@@ -1,7 +1,7 @@
 {
   "name": "localcoder",
   "version": "0.1.0",
-  "description": "Hardware-aware local coding agent platform — Phase 0 (server + CLI vertical slice)",
+  "description": "Hardware-aware local coding assistant with local inference, repository intelligence, and persistent memory",
   "license": "Apache-2.0",
   "bin": {
     "localcoder": "dist/cli/index.js"
@@ -18,7 +18,7 @@
     "models": "tsx src/cli/index.ts models",
     "serve": "tsx src/cli/index.ts serve",
     "serve:mock": "LOCALCODER_BACKEND=mock tsx src/cli/index.ts serve",
-    "test": "tsx --test test/phase0-acceptance/*.test.ts test/phase1-acceptance/*.test.ts test/phase1-enhancement/*.test.ts test/phase2-acceptance/*.test.ts test/phase2-real/*.test.ts test/phase3-production/*.test.ts",
+    "test": "tsx --test test/core/*.test.ts test/repository/*.test.ts test/memory/*.test.ts test/agent/*.test.ts test/inference/*.test.ts test/server/*.test.ts",
     "verify": "tsx src/cli/index.ts verify",
     "make-test-model": "tsx scripts/tiny-model.ts",
     "bench:index": "tsx scripts/bench-index.ts",

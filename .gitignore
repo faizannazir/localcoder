@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 dist/
 models/*.gguf
 *.log
@@ -6,3 +6,4 @@ models/*.gguf
 registry/models.local.json
 engine/
 verify-report.json
+.localcoder/

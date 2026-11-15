@@ -6,7 +6,7 @@ import path from "path";
  * (run_tests, run_linter, ...) and optionally a target FILE. The argv templates below are the
  * only things that can ever be executed. `{file}` is replaced by a sandbox-validated path.
  * NOTE: this constrains WHICH command runs, not what the repo's own scripts do (e.g. `npm test`
- * runs whatever package.json says) — see NOTES.md.
+ * runs whatever package.json says) — see docs/TECHNICAL-NOTES.md.
  */
 export interface AgentConfig {
   test?: string[];

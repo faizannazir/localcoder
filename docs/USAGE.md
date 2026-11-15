@@ -69,7 +69,7 @@ http://127.0.0.1:8080/v1
 - **No power-mode override flag yet.** The Policy Engine picks a power mode automatically from hardware state; a `--power-mode` CLI flag / request override is planned for Phase 3, not Phase 0.
 - **No agent, no repository awareness.** `/v1/chat/completions` is a single-shot completion — there's no multi-step tool-calling loop yet (that's `CodingAgent`, Phase 2) and no project context assembly (that's `ContextManager`, Phase 1).
 - **KV-cache size estimates are rough.** The router's memory-safety math uses a simple heuristic (see `src/router/router.ts`), not a real per-architecture calculation — documented as a known follow-up, not silently assumed accurate.
-- **Windows and macOS thermal readings are always `"unknown"`.** Neither platform has a reliable non-elevated thermal API; rather than fake a number from CPU load, the Policy Engine treats `"unknown"` exactly like `"fair"` (a real, tested behavior — see `test/phase0-acceptance/at-0.6-thermal-unknown.test.ts`).
+- **Windows and macOS thermal readings are always `"unknown"`.** Neither platform has a reliable non-elevated thermal API; rather than fake a number from CPU load, the Policy Engine treats `"unknown"` exactly like `"fair"` (a real, tested behavior — see `test/core/thermal-policy.test.ts`).
 
 ## Troubleshooting
 

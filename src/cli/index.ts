@@ -54,7 +54,7 @@ async function main() {
       // eslint-disable-next-line no-console
       console.log(
         [
-          "localcoder — Phase 0-2 (inference API, repository intelligence, coding agent)",
+          "LocalCoder — local inference, repository intelligence, and coding tools",
           "",
           "Usage:",
           "  localcoder serve [--port 8080] [--backend llama|mock]",

@@ -71,7 +71,7 @@ export class FsWatcher implements IRepositoryWatcher {
       const abs = path.join(dir, entry.name);
       const relative = path.relative(base, abs).split(path.sep).join("/");
       if (this.ignore?.shouldIgnore(relative, entry.isDirectory())) continue;
-      if (entry.isSymbolicLink()) continue; // never follow symlinks while walking — see security notes in NOTES.md
+      if (entry.isSymbolicLink()) continue; // never follow symlinks while walking — see security notes in docs/TECHNICAL-NOTES.md
       if (entry.isDirectory()) this.walk(abs, base, out);
       else if (entry.isFile()) out.push(relative);
     }

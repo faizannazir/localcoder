@@ -203,7 +203,7 @@ export interface InferenceBackend {
 // were explicitly unused placeholders (see the comment that used to sit here: "not
 // implemented in Phase 0"). Nothing in the Phase 0 codebase constructs or consumes them,
 // so evolving their shape to match what Phase 1 actually needs is not a breaking change —
-// see NOTES.md for the explicit call-out.
+// see docs/TECHNICAL-NOTES.md for the explicit call-out.
 // ---------------------------------------------------------------------------
 
 export type SymbolKind =
@@ -345,7 +345,7 @@ export interface ContextManager {
 //
 // Purely additive: nothing below changes an existing type's shape. MemoryStore lives
 // alongside IndexStore in the same per-repo SQLite file (project isolation falls out of
-// that for free — see NOTES.md). AdaptiveContextManager composes the existing, already-
+// that for free — see docs/TECHNICAL-NOTES.md). AdaptiveContextManager composes the existing, already-
 // tested DefaultContextManager rather than replacing it.
 // ---------------------------------------------------------------------------
 

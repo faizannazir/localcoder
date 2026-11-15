@@ -263,7 +263,7 @@ localcoder/
 ├── schemas/                      # JSON Schemas, §4
 ├── registry/models.json          # static ModelRegistryEntry[], Phase 0
 └── test/
-    ├── phase0-acceptance/        # §7, one file per AT-0.x
+    ├── core/        # §7, one file per AT-0.x
     └── unit/
 ```
 
