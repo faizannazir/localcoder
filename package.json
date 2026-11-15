@@ -1,0 +1,32 @@
+{
+  "name": "localcoder",
+  "version": "0.1.0",
+  "description": "Hardware-aware local coding agent platform — Phase 0 (server + CLI vertical slice)",
+  "license": "Apache-2.0",
+  "bin": {
+    "localcoder": "dist/cli/index.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "dev": "tsx src/cli/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "start": "node dist/cli/index.js",
+    "doctor": "tsx src/cli/index.ts doctor",
+    "models": "tsx src/cli/index.ts models",
+    "serve": "tsx src/cli/index.ts serve",
+    "serve:mock": "LOCALCODER_BACKEND=mock tsx src/cli/index.ts serve",
+    "test": "tsx --test test/phase0-acceptance/*.test.ts test/phase1-acceptance/*.test.ts test/phase1-enhancement/*.test.ts test/phase2-acceptance/*.test.ts test/phase2-real/*.test.ts test/phase3-production/*.test.ts",
+    "verify": "tsx src/cli/index.ts verify",
+    "make-test-model": "tsx scripts/tiny-model.ts",
+    "bench:index": "tsx scripts/bench-index.ts",
+    "bench:context": "tsx scripts/bench-context.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.0",
+    "tsx": "^4.19.0"
+  }
+}

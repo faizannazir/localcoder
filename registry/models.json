@@ -1,0 +1,190 @@
+[
+  {
+    "model_id": "qwen2.5-coder-0.5b-q4",
+    "architecture": "dense",
+    "parameter_count": {
+      "total": 0.5
+    },
+    "quantization": "Q4_K_M",
+    "file_path": "models/Qwen2.5-Coder-0.5B-Instruct-Q4_K_M.gguf",
+    "context_limit": 32768,
+    "backend_requirements": [
+      "cpu",
+      "metal",
+      "cuda",
+      "vulkan"
+    ],
+    "estimated_memory_gb": 0.45,
+    "capabilities": [
+      "fim"
+    ]
+  },
+  {
+    "model_id": "qwen2.5-coder-1.5b-q4",
+    "architecture": "dense",
+    "parameter_count": {
+      "total": 1.5
+    },
+    "quantization": "Q4_K_M",
+    "file_path": "models/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf",
+    "context_limit": 32768,
+    "backend_requirements": [
+      "cpu",
+      "metal",
+      "cuda",
+      "vulkan"
+    ],
+    "estimated_memory_gb": 1.0,
+    "capabilities": [
+      "fim"
+    ]
+  },
+  {
+    "model_id": "qwen2.5-coder-3b-q4",
+    "architecture": "dense",
+    "parameter_count": {
+      "total": 3
+    },
+    "quantization": "Q4_K_M",
+    "file_path": "models/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
+    "context_limit": 32768,
+    "backend_requirements": [
+      "cpu",
+      "metal",
+      "cuda",
+      "vulkan"
+    ],
+    "estimated_memory_gb": 2.0,
+    "capabilities": [
+      "fim"
+    ]
+  },
+  {
+    "model_id": "qwen2.5-coder-7b-q4",
+    "architecture": "dense",
+    "parameter_count": {
+      "total": 7
+    },
+    "quantization": "Q4_K_M",
+    "file_path": "models/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+    "context_limit": 32768,
+    "backend_requirements": [
+      "cpu",
+      "metal",
+      "cuda",
+      "vulkan"
+    ],
+    "estimated_memory_gb": 5.0,
+    "capabilities": [
+      "fim",
+      "tool_calling"
+    ]
+  },
+  {
+    "model_id": "qwen2.5-coder-14b-q4",
+    "architecture": "dense",
+    "parameter_count": {
+      "total": 14
+    },
+    "quantization": "Q4_K_M",
+    "file_path": "models/Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf",
+    "context_limit": 32768,
+    "backend_requirements": [
+      "cpu",
+      "metal",
+      "cuda",
+      "vulkan"
+    ],
+    "estimated_memory_gb": 9.0,
+    "capabilities": [
+      "fim",
+      "tool_calling"
+    ]
+  },
+  {
+    "model_id": "gpt-oss-20b-mxfp4",
+    "architecture": "moe",
+    "parameter_count": {
+      "total": 21,
+      "active": 3.6
+    },
+    "quantization": "mxfp4",
+    "file_path": "models/gpt-oss-20b-mxfp4.gguf",
+    "context_limit": 131072,
+    "backend_requirements": [
+      "cpu",
+      "metal",
+      "cuda",
+      "vulkan"
+    ],
+    "estimated_memory_gb": 14.0,
+    "capabilities": [
+      "tool_calling",
+      "long_context"
+    ]
+  },
+  {
+    "model_id": "devstral-small-2-24b-q4",
+    "architecture": "dense",
+    "parameter_count": {
+      "total": 24
+    },
+    "quantization": "Q4_K_M",
+    "file_path": "models/devstral-small-2-24b-q4_k_m.gguf",
+    "context_limit": 262144,
+    "backend_requirements": [
+      "cpu",
+      "metal",
+      "cuda",
+      "vulkan"
+    ],
+    "estimated_memory_gb": 13.0,
+    "capabilities": [
+      "tool_calling",
+      "long_context"
+    ]
+  },
+  {
+    "model_id": "qwen3-coder-30b-a3b-q4",
+    "architecture": "moe",
+    "parameter_count": {
+      "total": 30.5,
+      "active": 3.3
+    },
+    "quantization": "Q4_K_M",
+    "file_path": "models/qwen3-coder-30b-a3b-q4_k_m.gguf",
+    "context_limit": 262144,
+    "backend_requirements": [
+      "cpu",
+      "metal",
+      "cuda",
+      "vulkan"
+    ],
+    "estimated_memory_gb": 18.6,
+    "capabilities": [
+      "tool_calling",
+      "long_context"
+    ]
+  },
+  {
+    "model_id": "qwen2.5-coder-32b-q4",
+    "architecture": "dense",
+    "parameter_count": {
+      "total": 32
+    },
+    "quantization": "Q4_K_M",
+    "file_path": "models/Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf",
+    "context_limit": 32768,
+    "backend_requirements": [
+      "cpu",
+      "metal",
+      "cuda",
+      "vulkan"
+    ],
+    "estimated_memory_gb": 20.0,
+    "capabilities": [
+      "tool_calling",
+      "long_context"
+    ]
+  }
+]

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+models/*.gguf
+*.log
+.DS_Store
+registry/models.local.json
+engine/
+verify-report.json
