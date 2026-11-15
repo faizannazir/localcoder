@@ -30,9 +30,10 @@ const SECRET_PATTERNS: RegExp[] = [
 ];
 
 export function isSecretPath(relativePath: string): boolean {
-  const base = path.basename(relativePath);
+  const normalizedPath = relativePath.replace(/\\/g, "/").toLowerCase();
+  const base = path.posix.basename(normalizedPath);
   if (SECRET_PATTERNS.some((re) => re.test(base))) return true;
-  if (relativePath.split(path.sep).includes(".ssh")) return true;
+  if (normalizedPath.split("/").includes(".ssh")) return true;
   return false;
 }
 
@@ -86,7 +87,7 @@ export class IgnoreRules {
   private gitignoreRules: { re: RegExp; dirOnly: boolean }[];
 
   constructor(root: string, config: IgnoreConfig = {}) {
-    this.dirs = new Set([...DEFAULT_IGNORE_DIRS, ...(config.extraDirs ?? [])]);
+    this.dirs = new Set([...DEFAULT_IGNORE_DIRS, ...(config.extraDirs ?? [])].map((dir) => dir.toLowerCase()));
     this.gitignoreRules = [
       ...loadGitignore(root),
       ...(config.extraGitignorePatterns ?? [])
@@ -98,7 +99,7 @@ export class IgnoreRules {
   /** relativePath uses forward slashes, relative to the workspace root. */
   shouldIgnore(relativePath: string, isDirectory = false): boolean {
     const parts = relativePath.split("/");
-    if (parts.some((p) => this.dirs.has(p))) return true;
+    if (parts.some((p) => this.dirs.has(p.toLowerCase()))) return true;
     if (isSecretPath(relativePath)) return true;
     for (const rule of this.gitignoreRules) {
       if (rule.dirOnly && !isDirectory && !relativePath.includes("/")) continue;

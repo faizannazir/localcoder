@@ -92,6 +92,22 @@ test("sandbox: traversal, absolute paths, symlink escapes, secrets, .git and .lo
   } finally { repo.cleanup(); rmSync(outside, { recursive: true, force: true }); }
 });
 
+test("protected paths reject case variants in tools and repository indexing", async () => {
+  const protectedFiles = [".ENV", "SECRET.KEY", "Credentials.JSON", "Secrets.YAML", ".SSH/id_rsa", ".GIT/config", ".LOCALCODER/private.js"];
+  const repo = await makeRepo({ extra: Object.fromEntries(protectedFiles.map((file) => [file, "sensitive placeholder"])) });
+  try {
+    const { call } = rt(repo);
+    for (const file of protectedFiles) {
+      assert.equal((await call("read_file", { path: file })).ok, false, `read of ${file} must be refused`);
+      assert.equal((await call("write_file", { path: file, content: "overwritten", allow_overwrite: true })).ok, false, `write to ${file} must be refused`);
+    }
+    const files = ((await call("list_files")).data as { files: string[] }).files;
+    assert.ok(!files.some((file) => protectedFiles.includes(file)), "listing excludes protected case variants");
+    const search = await call("search", { query: "sensitive placeholder" });
+    assert.equal((search.data as { count: number }).count, 0, "index excludes protected case variants");
+  } finally { repo.cleanup(); }
+});
+
 test("write_file creates new files but refuses overwrite without the last-resort flag", async () => {
   const repo = await makeRepo();
   try {

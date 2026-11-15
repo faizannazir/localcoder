@@ -18,7 +18,7 @@ export class Sandbox {
   }
 
   private deny(rel: string, forWrite: boolean): string | null {
-    const parts = rel.split("/");
+    const parts = rel.toLowerCase().split("/");
     if (isSecretPath(rel)) return "path is protected (secret material)";
     if (parts.includes(".git")) return "the .git directory is off-limits";
     if (parts.includes(".localcoder")) return "the .localcoder directory is off-limits";
