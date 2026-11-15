@@ -1,6 +1,7 @@
 import type { ServerResponse } from "http";
 import type { AppContext } from "../context";
 import { isRejection } from "../../types/index";
+import { generationValidationError } from "../validation";
 
 interface ChatRequestBody {
   messages: { role: "system" | "user" | "assistant"; content: string }[];
@@ -11,6 +12,12 @@ interface ChatRequestBody {
 }
 
 export async function handleChatCompletions(body: unknown, res: ServerResponse, ctx: AppContext): Promise<void> {
+  const validationError = generationValidationError(body, "chat");
+  if (validationError) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: validationError } }));
+    return;
+  }
   const parsed = body as Partial<ChatRequestBody>;
   if (!parsed || !Array.isArray(parsed.messages) || parsed.messages.length === 0) {
     res.writeHead(400, { "Content-Type": "application/json" });
@@ -60,7 +67,7 @@ export async function handleChatCompletions(body: unknown, res: ServerResponse, 
     try {
       for await (const tok of backend.generate(
         { mode: "chat", messages: parsed.messages },
-        { max_tokens: parsed.max_tokens ?? decision.max_output_tokens, temperature: parsed.temperature, stop: parsed.stop }
+        { max_tokens: Math.min(parsed.max_tokens ?? decision.max_output_tokens, decision.max_output_tokens), temperature: parsed.temperature, stop: parsed.stop }
       )) {
         const chunk = {
           id: `chatcmpl-${created}`,

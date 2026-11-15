@@ -29,19 +29,47 @@ export interface ServeOptions {
   backendFactory?: () => import("../types/index").InferenceBackend;
 }
 
+const MAX_BODY_BYTES = 1024 * 1024;
+
+class RequestBodyError extends Error {
+  constructor(readonly status: 400 | 413, message: string) { super(message); }
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
-      if (!raw) return resolve({});
+    req.once("error", reject);
+    if (Number(req.headers["content-length"]) > MAX_BODY_BYTES) {
+      req.resume();
+      reject(new RequestBodyError(413, "Request body exceeds the 1 MiB limit."));
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    const onData = (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > MAX_BODY_BYTES) {
+        chunks.length = 0;
+        req.removeListener("data", onData);
+        req.resume();
+        reject(new RequestBodyError(413, "Request body exceeds the 1 MiB limit."));
+        return;
+      }
+      chunks.push(chunk);
+    };
+    req.on("data", onData);
+    req.once("aborted", () => {
+      chunks.length = 0;
+      reject(new RequestBodyError(400, "Request body was interrupted."));
+    });
+    req.once("end", () => {
+      if (bytes > MAX_BODY_BYTES) return;
+      if (bytes === 0) return resolve({});
       try {
-        resolve(JSON.parse(raw));
+        resolve(JSON.parse(Buffer.concat(chunks, bytes).toString("utf8")));
       } catch {
-        reject(new Error("Invalid JSON body"));
+        reject(new RequestBodyError(400, "Invalid JSON body"));
       }
     });
-    req.on("error", reject);
   });
 }
 
@@ -113,7 +141,8 @@ export function createServer(ctx: AppContext, security: SecurityOptions = securi
       res.end(JSON.stringify({ error: { message: `No route for ${method} ${url}` } }));
     } catch (err) {
       if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
+        const status = err instanceof RequestBodyError ? err.status : 500;
+        res.writeHead(status, { "Content-Type": "application/json", ...(status === 413 ? { Connection: "close" } : {}) });
       }
       res.end(JSON.stringify({ error: { message: (err as Error).message ?? "Internal error" } }));
     }

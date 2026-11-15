@@ -7,6 +7,7 @@
 import type { ServerResponse } from "http";
 import type { AppContext } from "../context";
 import { isRejection } from "../../types/index";
+import { generationValidationError } from "../validation";
 
 interface CompletionsRequestBody {
   prefix: string;
@@ -17,6 +18,12 @@ interface CompletionsRequestBody {
 }
 
 export async function handleCompletions(body: unknown, res: ServerResponse, ctx: AppContext): Promise<void> {
+  const validationError = generationValidationError(body, "fim");
+  if (validationError) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: validationError } }));
+    return;
+  }
   const parsed = body as Partial<CompletionsRequestBody>;
   if (typeof parsed?.prefix !== "string") {
     res.writeHead(400, { "Content-Type": "application/json" });
@@ -54,7 +61,7 @@ export async function handleCompletions(body: unknown, res: ServerResponse, ctx:
     try {
       for await (const tok of backend.generate(
         { mode: "fim", prefix: parsed.prefix, suffix: parsed.suffix ?? "" },
-        { max_tokens: parsed.max_tokens ?? decision.max_output_tokens, temperature: parsed.temperature ?? 0.2, stop: parsed.stop }
+        { max_tokens: Math.min(parsed.max_tokens ?? decision.max_output_tokens, decision.max_output_tokens), temperature: parsed.temperature ?? 0.2, stop: parsed.stop }
       )) {
         res.write(`data: ${JSON.stringify({ choices: [{ text: tok.token, finish_reason: tok.finish_reason ?? null }] })}\n\n`);
       }
