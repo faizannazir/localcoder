@@ -5,6 +5,7 @@ import path from "path";
 import os from "os";
 import { buildContext, createServer } from "../../src/server/index";
 import type { AddressInfo } from "net";
+import { FAKE_PROFILE } from "../phase2-acceptance/helpers";
 
 function makeTempProjectWithTinyModel(): string {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "localcoder-test-"));
@@ -20,7 +21,7 @@ function makeTempProjectWithTinyModel(): string {
         file_path: "does-not-need-to-exist-for-the-mock-backend.gguf",
         context_limit: 4096,
         backend_requirements: ["cpu"],
-        estimated_memory_gb: 0.1, // deliberately tiny so it fits any real machine's budget
+        estimated_memory_gb: 0.1,
         capabilities: ["fim", "tool_calling"],
       },
     ])
@@ -31,6 +32,7 @@ function makeTempProjectWithTinyModel(): string {
 async function startTestServer() {
   const tmp = makeTempProjectWithTinyModel();
   const ctx = buildContext({ baseDir: tmp, backend: "mock" });
+  ctx.profiler = { sample: async () => ({ ...FAKE_PROFILE }), onChange: () => () => {} };
   const server = createServer(ctx);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;

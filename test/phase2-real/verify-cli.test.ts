@@ -4,14 +4,16 @@ import { spawnSync } from "child_process";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import os from "os";
 import path from "path";
+import { pathToFileURL } from "url";
 import { buildGguf, qwenLikeKvs } from "./gguf-fixture";
 
 const CLI = path.join(__dirname, "../../src/cli/index.ts");
+const TSX = pathToFileURL(require.resolve("tsx")).href;
 function run(args: string[], cwd: string) {
   const env = { ...process.env };
   delete env.LOCALCODER_LLAMA_SERVER_BIN;
   env.PATH = [path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter); // hermetic: no llama-server on PATH
-  return spawnSync("npx", ["tsx", CLI, ...args], { cwd, env, encoding: "utf8" });
+  return spawnSync(process.execPath, ["--import", TSX, CLI, ...args], { cwd, env, encoding: "utf8", timeout: 30_000 });
 }
 
 test("verify with no llama-server: refuses to pretend — exit code 2, lists exactly what is missing with download names, writes a report", () => {

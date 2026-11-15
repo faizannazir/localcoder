@@ -10,11 +10,14 @@ import { spawnSync, spawn } from "child_process";
 import { exactKvCacheMb } from "../../src/router/router";
 import os from "os";
 import path from "path";
+import { pathToFileURL } from "url";
 import type { AddressInfo } from "net";
 import { LlamaCppBackend } from "../../src/inference/llama-cpp-backend";
 import { entryFromGguf } from "../../src/inference/gguf";
 import { readRssMb } from "../../src/inference/process-stats";
 import { DefaultModelRouter } from "../../src/router/router";
+import { HardwareProfiler } from "../../src/hardware/profiler";
+import { DefaultPolicyEngine } from "../../src/policy/engine";
 import { buildContext, createServer } from "../../src/server/index";
 import { isRejection, RoutingDecision } from "../../src/types/index";
 import { writeTinyModel } from "../../scripts/tiny-model";
@@ -189,10 +192,17 @@ test("REAL: the agent endpoint with a real (random-weight) model fails HONESTLY 
   } finally { await s.cleanup(); repo.cleanup(); }
 });
 
-test("REAL: `localcoder verify` against the real server + tiny model passes every plumbing step and honestly FAILS the model-quality steps (exit 1)", { skip }, () => {
+test("REAL: `localcoder verify` against the real server + tiny model passes every plumbing step and honestly FAILS the model-quality steps (exit 1)", { skip }, async (t) => {
+  const profile = await new HardwareProfiler().sample();
+  const policy = new DefaultPolicyEngine().derive(profile);
+  const routed = new DefaultModelRouter().route("hard_agent", policy, [entry]);
+  if (isRejection(routed)) {
+    t.skip(`the live hardware policy cannot fit the fixture (${policy.memory_budget_gb}GB safe budget)`);
+    return;
+  }
   const report = path.join(dir, "verify.json");
   const env = { ...process.env }; delete env.LOCALCODER_LLAMA_SERVER_BIN;
-  const r = spawnSync("npx", ["tsx", path.join(__dirname, "../../src/cli/index.ts"), "verify", "--llama-server", ENGINE!, "--model", MODEL, "--json-trials", "1", "--agent-seconds", "120", "--report", report], { cwd: dir, env, encoding: "utf8", timeout: 240_000 });
+  const r = spawnSync(process.execPath, ["--import", pathToFileURL(require.resolve("tsx")).href, path.join(__dirname, "../../src/cli/index.ts"), "verify", "--llama-server", ENGINE!, "--model", MODEL, "--json-trials", "1", "--agent-seconds", "120", "--report", report], { cwd: dir, env, encoding: "utf8", timeout: 240_000 });
   const j = JSON.parse(readFileSync(report, "utf8"));
   const status = (n: string) => j.steps.find((s: any) => s.name === n)?.status;
   for (const n of ["hardware", "llama-server", "model", "memory gate", "load model", "tokenizer", "chat generation", "fim /infill"]) assert.equal(status(n), "pass", `${n}: ${r.stdout}`);
