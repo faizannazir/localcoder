@@ -31,10 +31,11 @@ async function start() {
   const server = createServer(ctx, { allowedOrigins: [], extraHosts: [] });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
+  const agent = new http.Agent({ keepAlive: true });
   const postRaw = (endpoint: string, chunks: Buffer[], declaredBytes?: number) => new Promise<{ status: number; body: string }>((resolve, reject) => {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (declaredBytes !== undefined) headers["Content-Length"] = String(declaredBytes);
-    const request = http.request({ host: "127.0.0.1", port, path: endpoint, method: "POST", agent: false, headers }, (response) => {
+    const request = http.request({ host: "127.0.0.1", port, path: endpoint, method: "POST", agent, headers }, (response) => {
       let body = "";
       response.on("data", (chunk) => { body += chunk; });
       response.on("end", () => resolve({ status: response.statusCode!, body }));
@@ -48,6 +49,7 @@ async function start() {
   return {
     post, postRaw, generated, loads: () => loads,
     close: async () => {
+      agent.destroy();
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await ctx.modelManager.unloadAll();

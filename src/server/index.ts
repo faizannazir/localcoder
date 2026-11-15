@@ -145,7 +145,7 @@ export function createServer(ctx: AppContext, security: SecurityOptions = securi
     } catch (err) {
       if (!res.headersSent) {
         const status = err instanceof RequestBodyError ? err.status : 500;
-        res.writeHead(status, { "Content-Type": "application/json", ...(status === 413 ? { Connection: "close" } : {}) });
+        res.writeHead(status, { "Content-Type": "application/json" });
       }
       res.end(JSON.stringify({ error: { message: (err as Error).message ?? "Internal error" } }));
     } finally { res.removeListener("close", abort); }
