@@ -167,6 +167,7 @@ export class LlamaCppBackend implements InferenceBackend {
     if (prompt.mode === "chat") {
       const res = await fetch(`http://127.0.0.1:${this.port_}/v1/chat/completions`, {
         method: "POST",
+        signal: params.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: prompt.messages,
@@ -191,6 +192,7 @@ export class LlamaCppBackend implements InferenceBackend {
     // FIM mode — llama.cpp-native /infill, no OpenAI equivalent.
     const res = await fetch(`http://127.0.0.1:${this.port_}/infill`, {
       method: "POST",
+      signal: params.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         input_prefix: prompt.prefix,

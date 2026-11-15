@@ -9,7 +9,7 @@ const json = (res: ServerResponse, code: number, body: unknown) => {
   res.end(JSON.stringify(body));
 };
 
-export async function handleAgentRun(body: unknown, res: ServerResponse, ctx: AppContext, req?: IncomingMessage): Promise<void> {
+export async function handleAgentRun(body: unknown, res: ServerResponse, ctx: AppContext, req?: IncomingMessage, signal?: AbortSignal): Promise<void> {
   const b = (body ?? {}) as { task?: unknown; session_id?: unknown; resume_task_id?: unknown };
   if (typeof b.task !== "string" || b.task.trim() === "") return json(res, 400, { error: { message: '"task" (non-empty string) is required.' } });
 
@@ -17,6 +17,7 @@ export async function handleAgentRun(body: unknown, res: ServerResponse, ctx: Ap
   const pre = await preflightAgent(ctx);
   if (!pre.ok) return json(res, 503, { error: { message: pre.message, reason: pre.reason, attempted: pre.attempted } });
 
+  if (signal?.aborted) return;
   if (!tryLockRepo(ctx.repoRoot)) return json(res, 409, { error: { message: "an agent run is already active for this repository" } });
   let session: Awaited<ReturnType<typeof openAgentSession>> | null = null;
   let aborted = false;
@@ -24,10 +25,11 @@ export async function handleAgentRun(body: unknown, res: ServerResponse, ctx: Ap
   try {
     try { lease = await ctx.modelManager.acquire(pre.decision, pre.policy, 8); }
     catch (err) { return json(res, 502, { error: { message: `Failed to load model "${pre.decision.model_id}": ${(err as Error).message}` } }); }
+    if (signal?.aborted) return;
     const backend = lease.backend;
 
     res.on("close", () => { aborted = true; });
-    session = await openAgentSession({ root: ctx.repoRoot, backend, policy: pre.policy, decision: pre.decision, aborted: () => aborted });
+    session = await openAgentSession({ root: ctx.repoRoot, backend, policy: pre.policy, decision: pre.decision, aborted: () => aborted || signal?.aborted === true, signal });
 
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
     for await (const ev of session.agent.run({

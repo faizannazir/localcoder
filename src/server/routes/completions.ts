@@ -17,7 +17,7 @@ interface CompletionsRequestBody {
   stop?: string[];
 }
 
-export async function handleCompletions(body: unknown, res: ServerResponse, ctx: AppContext): Promise<void> {
+export async function handleCompletions(body: unknown, res: ServerResponse, ctx: AppContext, signal?: AbortSignal): Promise<void> {
   const validationError = generationValidationError(body, "fim");
   if (validationError) {
     res.writeHead(400, { "Content-Type": "application/json" });
@@ -49,6 +49,7 @@ export async function handleCompletions(body: unknown, res: ServerResponse, ctx:
     return;
   }
 
+  if (signal?.aborted) return;
   let lease;
   try {
     lease = await ctx.modelManager.acquire(decision, policy, /* priority */ 10); // autocomplete defaults to high residency priority
@@ -60,12 +61,13 @@ export async function handleCompletions(body: unknown, res: ServerResponse, ctx:
 
   const backend = lease.backend;
   try {
+    if (signal?.aborted) return;
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
 
     try {
       for await (const tok of backend.generate(
         { mode: "fim", prefix: parsed.prefix, suffix: parsed.suffix ?? "" },
-        { max_tokens: Math.min(parsed.max_tokens ?? decision.max_output_tokens, decision.max_output_tokens), temperature: parsed.temperature ?? 0.2, stop: parsed.stop }
+        { signal, max_tokens: Math.min(parsed.max_tokens ?? decision.max_output_tokens, decision.max_output_tokens), temperature: parsed.temperature ?? 0.2, stop: parsed.stop }
       )) {
         res.write(`data: ${JSON.stringify({ choices: [{ text: tok.token, finish_reason: tok.finish_reason ?? null }] })}\n\n`);
       }

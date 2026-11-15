@@ -168,6 +168,7 @@ export type PromptPayload =
   | { mode: "fim"; prefix: string; suffix: string };
 
 export interface GenParams {
+  signal?: AbortSignal;
   max_tokens: number;
   temperature?: number;
   stop?: string[];

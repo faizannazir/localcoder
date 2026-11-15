@@ -104,6 +104,9 @@ export function buildContext(opts: ServeOptions = {}): AppContext {
 
 export function createServer(ctx: AppContext, security: SecurityOptions = securityFromEnv()) {
   return http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const cancellation = new AbortController();
+    const abort = () => cancellation.abort();
+    res.once("close", abort);
     try {
       const denied = checkRequest(req, security);
       if (denied) {
@@ -121,16 +124,16 @@ export function createServer(ctx: AppContext, security: SecurityOptions = securi
       }
       if (method === "POST" && url === "/v1/chat/completions") {
         const body = await readJsonBody(req);
-        return await handleChatCompletions(body, res, ctx);
+        return await handleChatCompletions(body, res, ctx, cancellation.signal);
       }
       if (method === "POST" && url === "/v1/completions") {
         const body = await readJsonBody(req);
-        return await handleCompletions(body, res, ctx);
+        return await handleCompletions(body, res, ctx, cancellation.signal);
       }
 
       if (method === "POST" && url === "/v1/agent/run") {
         const body = await readJsonBody(req);
-        return await handleAgentRun(body, res, ctx, req);
+        return await handleAgentRun(body, res, ctx, req, cancellation.signal);
       }
       if (method === "POST" && url === "/v1/agent/undo") {
         const body = await readJsonBody(req);
@@ -145,7 +148,7 @@ export function createServer(ctx: AppContext, security: SecurityOptions = securi
         res.writeHead(status, { "Content-Type": "application/json", ...(status === 413 ? { Connection: "close" } : {}) });
       }
       res.end(JSON.stringify({ error: { message: (err as Error).message ?? "Internal error" } }));
-    }
+    } finally { res.removeListener("close", abort); }
   });
 }
 

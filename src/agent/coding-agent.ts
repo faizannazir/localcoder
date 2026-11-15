@@ -41,6 +41,7 @@ export interface AgentDeps {
   config: AgentConfig;
   now?: () => number;
   aborted?: () => boolean;
+  signal?: AbortSignal;
   limits?: { max_fix_attempts?: number; max_reason_retries?: number; max_iterations?: number };
 }
 
@@ -126,7 +127,7 @@ export class CodingAgent implements ICodingAgent {
 
   // ------------------------------------------------------------------ guards, tools, model
   private guard() {
-    if (this.d.aborted?.()) throw new AbortError("run aborted (client disconnected)");
+    if (this.d.signal?.aborted || this.d.aborted?.()) throw new AbortError("run aborted (client disconnected)");
     if (this.now() > this.deadline) throw new LimitError(`wall-clock limit reached (${this.d.policy.max_agent_wall_seconds}s)`);
   }
 
@@ -161,7 +162,7 @@ export class CodingAgent implements ICodingAgent {
         throw e;
       }
       let text = "";
-      for await (const t of this.d.backend.generate({ mode: "chat", messages: fit.messages }, { max_tokens: this.d.decision.max_output_tokens, temperature: 0.2 })) text += t.token;
+      for await (const t of this.d.backend.generate({ mode: "chat", messages: fit.messages }, { signal: this.d.signal, max_tokens: this.d.decision.max_output_tokens, temperature: 0.2 })) text += t.token;
       this.state.model_calls++;
       this.state.prompt_tokens_total += fit.tokens;
       if (fit.basis === "estimated") this.state.token_basis = "estimated";

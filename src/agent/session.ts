@@ -29,7 +29,7 @@ export function unlockRepo(root: string) { activeRepos.delete(path.resolve(root)
 
 /** Opens the repo's own index/memory (per-repo SQLite — isolation by construction) and builds an agent around an already-loaded backend. */
 export async function openAgentSession(opts: {
-  root: string; backend: InferenceBackend; policy: ResourcePolicy; decision: RoutingDecision; aborted?: () => boolean;
+  root: string; backend: InferenceBackend; policy: ResourcePolicy; decision: RoutingDecision; aborted?: () => boolean; signal?: AbortSignal;
 }): Promise<AgentSession> {
   const db = indexDbPath(opts.root);
   const index = new SqliteIndexStore(db);
@@ -42,7 +42,7 @@ export async function openAgentSession(opts: {
     root: opts.root, index, memory, indexService,
     tools: new DefaultToolRuntime({ root: opts.root, index, indexService, config }),
     backend: opts.backend, tokenCounter: new FallbackTokenCounter(opts.backend),
-    policy: opts.policy, decision: opts.decision, stateStore: new AgentStateStore(opts.root), config, aborted: opts.aborted,
+    policy: opts.policy, decision: opts.decision, stateStore: new AgentStateStore(opts.root), config, aborted: opts.aborted, signal: opts.signal,
   });
   return { agent, indexedNow, close: () => { index.close(); memory.close(); } };
 }

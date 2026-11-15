@@ -98,7 +98,8 @@ test("HTTP generation caps requested tokens to routing policy and preserves smal
     assert.equal((await server.post("/v1/completions", { prefix: "a", max_tokens: 900000 })).status, 200);
     assert.equal(server.generated.at(-1)!.params.max_tokens, 64);
     assert.equal((await server.post("/v1/chat/completions", { ...chat, max_tokens: 8, temperature: 0, stop: ["end"] })).status, 200);
-    assert.deepEqual(server.generated.at(-1)!.params, { max_tokens: 8, temperature: 0, stop: ["end"] });
+    const { max_tokens, temperature, stop } = server.generated.at(-1)!.params;
+    assert.deepEqual({ max_tokens, temperature, stop }, { max_tokens: 8, temperature: 0, stop: ["end"] });
   } finally { await server.close(); }
 });
 
