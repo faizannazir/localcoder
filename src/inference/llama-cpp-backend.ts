@@ -220,10 +220,11 @@ export class LlamaCppBackend implements InferenceBackend {
     });
   }
 
-  async tokenize(text: string): Promise<number[]> {
+  async tokenize(text: string, signal?: AbortSignal): Promise<number[]> {
     if (!this.port_) throw new Error("LlamaCppBackend.tokenize() called before load()");
     const res = await fetch(`http://127.0.0.1:${this.port_}/tokenize`, {
       method: "POST",
+      signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: text }),
     });
@@ -232,7 +233,7 @@ export class LlamaCppBackend implements InferenceBackend {
     return body.tokens;
   }
 
-  async countTokens(text: string): Promise<number> {
-    return (await this.tokenize(text)).length;
+  async countTokens(text: string, signal?: AbortSignal): Promise<number> {
+    return (await this.tokenize(text, signal)).length;
   }
 }

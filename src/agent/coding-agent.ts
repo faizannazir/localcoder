@@ -170,6 +170,7 @@ export class CodingAgent implements ICodingAgent {
     sections: (budget: number, adaptive: AdaptiveContextManager) => Promise<PromptSection[]>,
     validate: (o: unknown) => T, purpose: string): AsyncGenerator<AgentEvent, T> {
     this.guard();
+    const signal = AbortSignal.any([...(this.d.signal ? [this.d.signal] : []), AbortSignal.timeout(Math.max(1, Math.ceil(this.deadline - this.now())))]);
     const operation = async (model: RoleModel): Promise<T> => {
       this.guard();
       const budget = this.promptBudget(model);
@@ -187,7 +188,7 @@ export class CodingAgent implements ICodingAgent {
         }
         this.guard();
         let text = "";
-        for await (const t of model.backend.generate({ mode: "chat", messages: fit.messages }, { signal: this.d.signal, max_tokens: model.decision.max_output_tokens, temperature: 0.2 })) {
+        for await (const t of model.backend.generate({ mode: "chat", messages: fit.messages }, { signal, max_tokens: model.decision.max_output_tokens, temperature: 0.2 })) {
           this.guard();
           text += t.token;
         }
@@ -204,7 +205,7 @@ export class CodingAgent implements ICodingAgent {
     };
     if (this.d.modelWorkflow) {
       yield { type: "model", task_id: this.state.task_id, phase: this.state.phase, role, model_id: this.d.modelWorkflow.models[role] };
-      return await this.d.modelWorkflow.withRole(role, operation);
+      return await this.d.modelWorkflow.withRole(role, operation, signal);
     }
     return await operation({ backend: this.d.backend!, tokenCounter: this.d.tokenCounter!, policy: this.d.policy, decision: this.d.decision });
   }

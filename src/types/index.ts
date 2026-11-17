@@ -193,8 +193,8 @@ export interface InferenceBackend {
    * hacks. Made async here; flagged in the delivery notes as a spec correction,
    * not a silent change.
    */
-  tokenize(text: string): Promise<number[]>;
-  countTokens(text: string): Promise<number>;
+  tokenize(text: string, signal?: AbortSignal): Promise<number[]>;
+  countTokens(text: string, signal?: AbortSignal): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------

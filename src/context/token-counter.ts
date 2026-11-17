@@ -2,10 +2,10 @@ import type { TokenCounter, TokenCountResult, InferenceBackend } from "../types/
 
 /** Real counts from the model's own tokenizer — see Phase 0's InferenceBackend.countTokens (llama-server's /tokenize). */
 export class BackendTokenCounter implements TokenCounter {
-  constructor(private backend: InferenceBackend) {}
+  constructor(private backend: InferenceBackend, private signal?: AbortSignal) {}
 
   async count(text: string, _model?: string): Promise<TokenCountResult> {
-    const count = await this.backend.countTokens(text);
+    const count = await this.backend.countTokens(text, this.signal);
     return { count, basis: "measured" };
   }
 }

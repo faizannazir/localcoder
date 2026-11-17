@@ -14,7 +14,7 @@ export interface RoleModel {
 }
 export interface AgentModelWorkflow {
   readonly models: AgentModels;
-  withRole<T>(role: ModelRole, operation: (model: RoleModel) => Promise<T>): Promise<T>;
+  withRole<T>(role: ModelRole, operation: (model: RoleModel) => Promise<T>, signal?: AbortSignal): Promise<T>;
 }
 export interface WorkflowDependencies {
   profiler: HardwareProfiler;
@@ -36,8 +36,9 @@ export class SequentialModelWorkflow implements AgentModelWorkflow {
   constructor(private deps: WorkflowDependencies, models: AgentModels, private signal?: AbortSignal) {
     this.models = parseAgentModels(models);
   }
-  async withRole<T>(role: ModelRole, operation: (model: RoleModel) => Promise<T>): Promise<T> {
-    const checkAbort = () => { if (this.signal?.aborted) throw new Error("run aborted (client disconnected)"); };
+  async withRole<T>(role: ModelRole, operation: (model: RoleModel) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const combinedSignal = this.signal && signal ? AbortSignal.any([this.signal, signal]) : signal ?? this.signal;
+    const checkAbort = () => { if (combinedSignal?.aborted) throw new Error("run aborted (client disconnected)"); };
     return this.deps.modelManager.withExclusiveModel(async () => {
       checkAbort();
       // Sample after previous leases/processes have drained, immediately before loading.
@@ -47,7 +48,7 @@ export class SequentialModelWorkflow implements AgentModelWorkflow {
       return { decision: result.decision, policy: result.policy };
     }, async ({ backend, decision, policy }) => {
       checkAbort();
-      return operation({ backend, decision, policy, tokenCounter: new BackendTokenCounter(backend) });
+      return operation({ backend, decision, policy, tokenCounter: new BackendTokenCounter(backend, combinedSignal) });
     });
   }
 }
