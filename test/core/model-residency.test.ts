@@ -121,7 +121,7 @@ test("exclusive model work blocks ordinary acquisitions at roomy budgets and unl
   const gate = new Promise<void>((resolve) => { finish = resolve; });
   let entered!: () => void;
   const started = new Promise<void>((resolve) => { entered = resolve; });
-  const work = manager.withExclusiveModel(decisionFor("a"), roomy, async ({ backend }) => {
+  const work = manager.withExclusiveModel(async () => ({ decision: decisionFor("a"), policy: roomy }), async ({ backend }) => {
     assert.equal(manager.resident().length, 1);
     assert.equal(manager.getBackend("b"), undefined);
     assert.equal(manager.getBackend("a"), backend);
@@ -154,7 +154,7 @@ test("exclusive work waits for leases and reloads the same ID with its requested
   const first = await manager.acquire(decisionFor("a"), lowMemPolicy());
   const next = { ...decisionFor("a"), ctx_window: 2048, kv_cache_dtype: "f16" as const };
   let entered = false;
-  const work = manager.withExclusiveModel(next, lowMemPolicy(), async () => { entered = true; });
+  const work = manager.withExclusiveModel(async () => ({ decision: next, policy: lowMemPolicy() }), async () => { entered = true; });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(entered, false);
   first.release();
