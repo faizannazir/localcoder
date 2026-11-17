@@ -37,13 +37,13 @@ export class DefaultModelManager implements IModelManager {
   }
 
   /** Holds the queue through tokenization/generation; callbacks must not call the manager. */
-  withExclusiveModel<T>(select: () => Promise<{ decision: RoutingDecision; policy: ResourcePolicy }>,
+  withExclusiveModel<T>(select: () => Promise<{ decision: RoutingDecision; policy: ResourcePolicy; signal?: AbortSignal }>,
     operation: (model: { loaded: LoadedModel; backend: InferenceBackend; decision: RoutingDecision; policy: ResourcePolicy }) => Promise<T>): Promise<T> {
     return this.exclusive(async () => {
       // Reload even the same ID so context and KV settings match this decision.
       for (const id of [...this.residents.keys()]) await this.unloadResident(id);
-      const { decision, policy } = await select();
-      const loaded = await this.ensureResident(decision, policy, 8);
+      const { decision, policy, signal } = await select();
+      const loaded = await this.ensureResident(decision, policy, 8, signal);
       const backend = this.residents.get(loaded.model_id)!.backend;
       try { return await operation({ loaded, backend, decision, policy }); }
       finally { await this.unloadResident(loaded.model_id); }
@@ -74,7 +74,7 @@ export class DefaultModelManager implements IModelManager {
     return this.exclusive(() => this.ensureResident(decision, policy, priority));
   }
 
-  private async ensureResident(decision: RoutingDecision, policy: ResourcePolicy, priority: number): Promise<LoadedModel> {
+  private async ensureResident(decision: RoutingDecision, policy: ResourcePolicy, priority: number, signal?: AbortSignal): Promise<LoadedModel> {
     const existing = this.residents.get(decision.model_id);
     if (existing) {
       existing.loaded.last_used_at = new Date().toISOString();
@@ -86,7 +86,7 @@ export class DefaultModelManager implements IModelManager {
     await this.evictResidents(entry.estimated_memory_gb, policy);
 
     const backend = this.backendFactory();
-    try { await backend.load(entry, decision); }
+    try { await backend.load(entry, decision, signal); }
     catch (error) { await backend.unload().catch(() => {}); throw error; }
 
     const loaded: LoadedModel = {

@@ -181,7 +181,7 @@ export interface TokenEvent {
 }
 
 export interface InferenceBackend {
-  load(entry: ModelRegistryEntry, decision: RoutingDecision): Promise<void>;
+  load(entry: ModelRegistryEntry, decision: RoutingDecision, signal?: AbortSignal): Promise<void>;
   generate(prompt: PromptPayload, params: GenParams): AsyncIterable<TokenEvent>;
   unload(): Promise<void>;
   /**

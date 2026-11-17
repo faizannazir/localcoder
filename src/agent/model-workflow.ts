@@ -45,7 +45,7 @@ export class SequentialModelWorkflow implements AgentModelWorkflow {
       const result = await routeRole(this.deps, this.models, role);
       if (!result.ok) throw new Error(result.message);
       checkAbort();
-      return { decision: result.decision, policy: result.policy };
+      return { decision: result.decision, policy: result.policy, signal: combinedSignal };
     }, async ({ backend, decision, policy }) => {
       checkAbort();
       return operation({ backend, decision, policy, tokenCounter: new BackendTokenCounter(backend, combinedSignal) });

@@ -42,6 +42,7 @@ async function waitForHealth(port: () => number | null, alias: string, deadline:
     }
     if (!signal.aborted) await new Promise((resolve) => setTimeout(resolve, HEALTH_POLL_INTERVAL_MS));
   }
+  signal.throwIfAborted();
   throw new Error(`llama-server did not become healthy within ${HEALTH_TIMEOUT_MS}ms.`);
 }
 
@@ -88,7 +89,8 @@ export class LlamaCppBackend implements InferenceBackend {
     this.binary = opts?.binary ?? locateLlamaServer().path ?? "llama-server";
   }
 
-  async load(entry: ModelRegistryEntry, decision: RoutingDecision): Promise<void> {
+  async load(entry: ModelRegistryEntry, decision: RoutingDecision, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     if (!existsSync(entry.file_path)) {
       throw new Error(
         `Model file not found: ${entry.file_path}. Registry entries are placeholders until you download the ` +
@@ -137,7 +139,7 @@ export class LlamaCppBackend implements InferenceBackend {
 
     this.proc = proc;
     const polling = new AbortController();
-    const readinessSignal = AbortSignal.any([polling.signal, AbortSignal.timeout(HEALTH_TIMEOUT_MS)]);
+    const readinessSignal = AbortSignal.any([polling.signal, AbortSignal.timeout(HEALTH_TIMEOUT_MS), ...(signal ? [signal] : [])]);
     try {
       this.port_ = await Promise.race([waitForHealth(() => listeningPort, alias, Date.now() + HEALTH_TIMEOUT_MS, readinessSignal), exitedEarly]);
     } catch (err) {
