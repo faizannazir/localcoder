@@ -1,6 +1,6 @@
 import path from "path";
 import { buildContext } from "../server/index";
-import { preflightAgent } from "../agent/preflight";
+import { prepareAgentRun, SequentialModelWorkflow } from "../agent/model-workflow";
 import { openAgentSession, tryLockRepo, unlockRepo } from "../agent/session";
 import { AgentStateStore } from "../agent/state";
 
@@ -13,18 +13,27 @@ export async function runAgent(args: string[]): Promise<void> {
   const task = args.find((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1].startsWith("--")));
   if (!task) { console.log('Usage: localcoder agent "<task>" [--session <id>] [--resume <task_id>] [--backend llama|mock]'); process.exitCode = 1; return; }
   const ctx = buildContext({ backend: flag(args, "--backend") as "llama" | "mock" | undefined });
-  const pre = await preflightAgent(ctx);
+  let prepared;
+  try { prepared = await prepareAgentRun(ctx.repoRoot, { task, session_id: flag(args, "--session"), resume_task_id: flag(args, "--resume") }, ctx); }
+  catch (error) { console.error(`localcoder: ${(error as Error).message}`); process.exitCode = 1; return; }
+  const pre = prepared.preflight;
   if (!pre.ok) { console.error(`localcoder: ${pre.message} (${pre.reason})`); process.exitCode = 1; return; }
   if (!tryLockRepo(ctx.repoRoot)) { console.error("localcoder: an agent run is already active for this repository"); process.exitCode = 1; return; }
   let session;
   try {
-    const loaded = await ctx.modelManager.ensure(pre.decision, pre.policy, 8);
-    const backend = ctx.modelManager.getBackend(loaded.model_id)!;
-    session = await openAgentSession({ root: ctx.repoRoot, backend, policy: pre.policy, decision: pre.decision });
-    console.log(`model: ${pre.decision.model_id}  power: ${pre.policy.power_mode}  repo: ${ctx.repoRoot}${session.indexedNow ? "  (indexed now, one-shot)" : ""}`);
+    let backend;
+    if (!prepared.models) {
+      const loaded = await ctx.modelManager.ensure(pre.decision, pre.policy, 8);
+      backend = ctx.modelManager.getBackend(loaded.model_id)!;
+    }
+    session = await openAgentSession({ root: ctx.repoRoot, backend,
+      modelWorkflow: prepared.models ? new SequentialModelWorkflow(ctx, prepared.models) : undefined,
+      config: prepared.config, policy: pre.policy, decision: pre.decision });
+    console.log(`${prepared.models ? "workflow: planner → coder → reviewer" : `model: ${pre.decision.model_id}`}  power: ${pre.policy.power_mode}  repo: ${ctx.repoRoot}${session.indexedNow ? "  (indexed now, one-shot)" : ""}`);
     let failed = false;
-    for await (const ev of session.agent.run({ task, session_id: flag(args, "--session"), resume_task_id: flag(args, "--resume") })) {
-      if (ev.type === "plan") console.log(`plan:\n${ev.steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`);
+    for await (const ev of session.agent.run(prepared.request)) {
+      if (ev.type === "model") console.log(`model: ${ev.role} → ${ev.model_id}`);
+      else if (ev.type === "plan") console.log(`plan:\n${ev.steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`);
       else if (ev.type === "tool_call") console.log(`  → ${ev.name} ${JSON.stringify(ev.args).slice(0, 120)}`);
       else if (ev.type === "tool_result") console.log(`  ← ${ev.name} ${ev.result.ok ? "ok" : "FAILED"} (${ev.result.size_bytes}B${ev.result.truncated ? ", truncated" : ""})`);
       else if (ev.type === "observation") console.log(`  observe: ${ev.content.split("\n")[0].slice(0, 140)}`);

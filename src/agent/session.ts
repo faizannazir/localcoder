@@ -6,7 +6,8 @@ import { MemoryStore } from "../memory/memory-store";
 import { indexDbPath } from "../index/open";
 import { FallbackTokenCounter } from "../context/token-counter";
 import { DefaultToolRuntime } from "./tool-runtime";
-import { loadAgentConfig } from "./config";
+import { loadAgentConfig, AgentConfig } from "./config";
+import type { AgentModelWorkflow } from "./model-workflow";
 import { AgentStateStore } from "./state";
 import { CodingAgent } from "./coding-agent";
 
@@ -27,22 +28,24 @@ export function tryLockRepo(root: string): boolean {
 }
 export function unlockRepo(root: string) { activeRepos.delete(path.resolve(root)); }
 
-/** Opens the repo's own index/memory (per-repo SQLite — isolation by construction) and builds an agent around an already-loaded backend. */
+/** Opens the repo's own index/memory (per-repo SQLite — isolation by construction) and builds a legacy or role-based agent. */
 export async function openAgentSession(opts: {
-  root: string; backend: InferenceBackend; policy: ResourcePolicy; decision: RoutingDecision; aborted?: () => boolean; signal?: AbortSignal;
+  root: string; backend?: InferenceBackend; modelWorkflow?: AgentModelWorkflow; config?: AgentConfig; policy: ResourcePolicy; decision: RoutingDecision; aborted?: () => boolean; signal?: AbortSignal;
 }): Promise<AgentSession> {
   const db = indexDbPath(opts.root);
   const index = new SqliteIndexStore(db);
   const memory = new MemoryStore(db);
-  const indexService = new IndexService(opts.root, index, memory);
-  let indexedNow = false;
-  if ((await index.stats()).files === 0) { await indexService.indexAll(); indexedNow = true; } // one explicit, one-shot index; not a background scan
-  const config = loadAgentConfig(opts.root);
-  const agent = new CodingAgent({
-    root: opts.root, index, memory, indexService,
-    tools: new DefaultToolRuntime({ root: opts.root, index, indexService, config }),
-    backend: opts.backend, tokenCounter: new FallbackTokenCounter(opts.backend),
-    policy: opts.policy, decision: opts.decision, stateStore: new AgentStateStore(opts.root), config, aborted: opts.aborted, signal: opts.signal,
-  });
-  return { agent, indexedNow, close: () => { index.close(); memory.close(); } };
+  try {
+    const indexService = new IndexService(opts.root, index, memory);
+    let indexedNow = false;
+    if ((await index.stats()).files === 0) { await indexService.indexAll(); indexedNow = true; } // one explicit, one-shot index; not a background scan
+    const config = opts.config ?? loadAgentConfig(opts.root);
+    const agent = new CodingAgent({
+      root: opts.root, index, memory, indexService,
+      tools: new DefaultToolRuntime({ root: opts.root, index, indexService, config }),
+      backend: opts.backend, modelWorkflow: opts.modelWorkflow, tokenCounter: new FallbackTokenCounter(opts.backend),
+      policy: opts.policy, decision: opts.decision, stateStore: new AgentStateStore(opts.root), config, aborted: opts.aborted, signal: opts.signal,
+    });
+    return { agent, indexedNow, close: () => { index.close(); memory.close(); } };
+  } catch (error) { index.close(); memory.close(); throw error; }
 }

@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import type { AppContext } from "../context";
-import { preflightAgent } from "../../agent/preflight";
+import { prepareAgentRun, SequentialModelWorkflow } from "../../agent/model-workflow";
 import { openAgentSession, tryLockRepo, unlockRepo } from "../../agent/session";
 import { AgentStateStore } from "../../agent/state";
 
@@ -13,8 +13,14 @@ export async function handleAgentRun(body: unknown, res: ServerResponse, ctx: Ap
   const b = (body ?? {}) as { task?: unknown; session_id?: unknown; resume_task_id?: unknown };
   if (typeof b.task !== "string" || b.task.trim() === "") return json(res, 400, { error: { message: '"task" (non-empty string) is required.' } });
 
-  // Resource/hardware policy gate BEFORE any expensive work.
-  const pre = await preflightAgent(ctx);
+  let prepared;
+  try {
+    prepared = await prepareAgentRun(ctx.repoRoot, {
+      task: b.task, session_id: typeof b.session_id === "string" ? b.session_id : undefined,
+      resume_task_id: typeof b.resume_task_id === "string" ? b.resume_task_id : undefined,
+    }, ctx);
+  } catch (error) { return json(res, 400, { error: { message: (error as Error).message } }); }
+  const pre = prepared.preflight;
   if (!pre.ok) return json(res, 503, { error: { message: pre.message, reason: pre.reason, attempted: pre.attempted } });
 
   if (signal?.aborted) return;
@@ -23,19 +29,19 @@ export async function handleAgentRun(body: unknown, res: ServerResponse, ctx: Ap
   let aborted = false;
   let lease: Awaited<ReturnType<AppContext["modelManager"]["acquire"]>> | undefined;
   try {
-    try { lease = await ctx.modelManager.acquire(pre.decision, pre.policy, 8); }
-    catch (err) { return json(res, 502, { error: { message: `Failed to load model "${pre.decision.model_id}": ${(err as Error).message}` } }); }
+    if (!prepared.models) {
+      try { lease = await ctx.modelManager.acquire(pre.decision, pre.policy, 8); }
+      catch (err) { return json(res, 502, { error: { message: `Failed to load model "${pre.decision.model_id}": ${(err as Error).message}` } }); }
+    }
     if (signal?.aborted) return;
-    const backend = lease.backend;
-
     res.on("close", () => { aborted = true; });
-    session = await openAgentSession({ root: ctx.repoRoot, backend, policy: pre.policy, decision: pre.decision, aborted: () => aborted || signal?.aborted === true, signal });
+    session = await openAgentSession({ root: ctx.repoRoot, backend: lease?.backend,
+      modelWorkflow: prepared.models ? new SequentialModelWorkflow(ctx, prepared.models, signal) : undefined,
+      config: prepared.config, policy: pre.policy, decision: pre.decision,
+      aborted: () => aborted || signal?.aborted === true, signal });
 
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
-    for await (const ev of session.agent.run({
-      task: b.task, session_id: typeof b.session_id === "string" ? b.session_id : undefined,
-      resume_task_id: typeof b.resume_task_id === "string" ? b.resume_task_id : undefined,
-    })) {
+    for await (const ev of session.agent.run(prepared.request)) {
       res.write(`event: ${ev.type}\ndata: ${JSON.stringify(ev)}\n\n`);
     }
     res.end();
