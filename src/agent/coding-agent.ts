@@ -154,6 +154,7 @@ export class CodingAgent implements ICodingAgent {
     const preview: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(args)) preview[k] = typeof v === "string" && v.length > 300 ? v.slice(0, 300) + `…(${v.length} chars)` : v;
     yield { type: "tool_call", task_id: this.state.task_id, phase: this.state.phase, id, name, args: preview };
+    this.guard();
     const result = await this.d.tools.invoke(name, args, { workspaceRoot: this.d.root });
     yield { type: "tool_result", task_id: this.state.task_id, phase: this.state.phase, id, name, result };
     return result;
