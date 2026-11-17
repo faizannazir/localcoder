@@ -366,6 +366,7 @@ export class CodingAgent implements ICodingAgent {
       if (res.ok) {
         const dd = res.data as any;
         e.status = "applied";
+        if (dd.warning) this.state.warnings.push(dd.warning);
         this.state.review = undefined;
         this.state.edits.push({ path: dd.path, op: e.op, before_hash: dd.before_hash, after_hash: dd.after_hash, backup_ref: dd.backup_ref, step: this.state.tool_calls });
         this.state.files_read[dd.path] = dd.after_hash;
@@ -406,6 +407,7 @@ export class CodingAgent implements ICodingAgent {
       const r = yield* this.callTool("run_formatter", { target: p });
       const edit = (r.data as any)?.edit;
       if (edit) {
+        if ((r.data as any).warning) this.state.warnings.push((r.data as any).warning);
         this.state.review = undefined;
         this.state.edits.push({ path: edit.path, op: "format", before_hash: edit.before_hash, after_hash: edit.after_hash, backup_ref: edit.backup_ref, step: this.state.tool_calls });
         this.state.files_read[edit.path] = edit.after_hash;

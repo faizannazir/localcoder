@@ -127,9 +127,14 @@ export class DefaultToolRuntime implements ToolRuntime {
     if (Buffer.byteLength(after) > MAX_WRITE_BYTES) return fail("resulting file exceeds the 512KB write limit");
     const backup_ref = before === null ? null : storeBackup(this.o.root, before);
     writeAtomic(abs, after);
-    await this.o.indexService?.handleEvent({ type: before === null ? "created" : "modified", path: rel });
+    const warning = await this.refreshAfterMutation(rel, before === null ? "created" : "modified");
     const stats = diffStats(unifiedDiff(before ?? "", after, rel));
-    return ok({ path: rel, mode, before_hash: before === null ? null : hashText(before), after_hash: hashText(after), backup_ref, lines_added: stats.added, lines_removed: stats.removed });
+    return ok({ path: rel, mode, before_hash: before === null ? null : hashText(before), after_hash: hashText(after), backup_ref, lines_added: stats.added, lines_removed: stats.removed, ...(warning ? { warning } : {}) });
+  }
+
+  private async refreshAfterMutation(rel: string, type: "created" | "modified"): Promise<string | undefined> {
+    try { await this.o.indexService?.handleEvent({ type, path: rel }); }
+    catch (error) { return `Index refresh failed for ${rel}; the file change was saved: ${redactSecrets(error instanceof Error ? error.message : String(error)).slice(0, 500)}`; }
   }
 
   private async writeFile(args: Record<string, unknown>): Promise<ToolResult> {
@@ -269,8 +274,9 @@ export class DefaultToolRuntime implements ToolRuntime {
     const res = await this.exec(fill(this.o.config.format_target, t.rel));
     const after = readFileSync(c.abs, "utf8");
     if (after !== before) {
-      await this.o.indexService?.handleEvent({ type: "modified", path: c.rel });
       (res.data as any).edit = { path: c.rel, before_hash: hashText(before), after_hash: hashText(after), backup_ref };
+      const warning = await this.refreshAfterMutation(c.rel, "modified");
+      if (warning) (res.data as any).warning = warning;
     }
     return res;
   }

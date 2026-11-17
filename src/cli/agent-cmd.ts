@@ -35,7 +35,11 @@ export async function runAgent(args: string[]): Promise<void> {
       if (ev.type === "model") console.log(`model: ${ev.role} → ${ev.model_id}`);
       else if (ev.type === "plan") console.log(`plan:\n${ev.steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`);
       else if (ev.type === "tool_call") console.log(`  → ${ev.name} ${JSON.stringify(ev.args).slice(0, 120)}`);
-      else if (ev.type === "tool_result") console.log(`  ← ${ev.name} ${ev.result.ok ? "ok" : "FAILED"} (${ev.result.size_bytes}B${ev.result.truncated ? ", truncated" : ""})`);
+      else if (ev.type === "tool_result") {
+        console.log(`  ← ${ev.name} ${ev.result.ok ? "ok" : "FAILED"} (${ev.result.size_bytes}B${ev.result.truncated ? ", truncated" : ""})`);
+        const warning = (ev.result.data as { warning?: string } | undefined)?.warning;
+        if (warning) console.warn(`  warning: ${warning}`);
+      }
       else if (ev.type === "observation") console.log(`  observe: ${ev.content.split("\n")[0].slice(0, 140)}`);
       else if (ev.type === "diff") console.log(`\nfinal diff:\n${ev.patch}`);
       else if (ev.type === "done") { failed = !ev.success; console.log(`\n${ev.success ? "DONE" : "STOPPED"} (verification: ${ev.verification}, fix attempts: ${ev.fix_attempts}) task ${ev.task_id}\n${ev.summary}`); }
