@@ -65,14 +65,31 @@ test("REAL: LlamaCppBackend loads, honours the context size, tokenizes with the 
     assert.equal(await backend.countTokens(text), toks.length);
     assert.notEqual(toks.length, Math.ceil(text.length / 4), "the real tokenizer disagrees with the chars/4 estimate");
 
-    const chat: string[] = []; let finish: string | undefined;
-    for await (const t of backend.generate({ mode: "chat", messages: [{ role: "user", content: "hi" }] }, { max_tokens: 8 })) { if (t.token) chat.push(t.token); finish = t.finish_reason ?? finish; }
-    assert.ok(chat.length >= 1 && chat.length <= 8, `streamed ${chat.length} chunks for max_tokens=8`);
-    assert.equal(finish, "length");
+    let finish: string | undefined;
+    for await (const t of backend.generate({ mode: "chat", messages: [{ role: "user", content: "hi" }] }, { max_tokens: 8 })) { finish = t.finish_reason ?? finish; }
+    assert.ok(finish === "length" || finish === "stop", "chat generation terminates normally");
+    const chatSlot = (await (await fetch(`http://127.0.0.1:${backend.port}/slots`)).json() as any[])[0];
+    assert.equal(chatSlot.params.n_predict, 8, "the backend forwards the requested chat token limit");
+    // Random byte tokens may produce no visible text, or split into several text chunks.
+    // Measure generated tokens through the engine's usage instead of counting SSE fragments.
+    const completion = await (await fetch(`http://127.0.0.1:${backend.port}/v1/chat/completions`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], max_tokens: 8, ignore_eos: true, stream: false }),
+    })).json() as any;
+    assert.equal(completion.usage.completion_tokens, 8);
 
-    const fim: string[] = [];
-    for await (const t of backend.generate({ mode: "fim", prefix: "def add(a, b):\n    return ", suffix: "\n" }, { max_tokens: 6 })) if (t.token) fim.push(t.token);
-    assert.ok(fim.length >= 1 && fim.length <= 6);
+    let fimFinished = false;
+    for await (const t of backend.generate({ mode: "fim", prefix: "def add(a, b):\n    return ", suffix: "\n" }, { max_tokens: 6 })) {
+      if (t.finish_reason) fimFinished = true;
+    }
+    assert.equal(fimFinished, true, "the real infill stream terminates");
+    const fimSlot = (await (await fetch(`http://127.0.0.1:${backend.port}/slots`)).json() as any[])[0];
+    assert.equal(fimSlot.params.n_predict, 6, "the backend forwards the requested infill token limit");
+    const infill = await (await fetch(`http://127.0.0.1:${backend.port}/infill`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input_prefix: "def add(a, b):\n    return ", input_suffix: "\n", prompt: "", n_predict: 6, ignore_eos: true, stream: false }),
+    })).json() as any;
+    assert.equal(infill.tokens_predicted, 6);
 
     const pid = backend.pid!, port = backend.port!;
     await backend.unload();
@@ -81,10 +98,25 @@ test("REAL: LlamaCppBackend loads, honours the context size, tokenizes with the 
   } finally { await backend.unload(); }
 });
 
+test("REAL: concurrent backend loads own distinct ports and verify their child instance", { skip }, async () => {
+  const backends = [1024, 1536, 2048].map(() => new LlamaCppBackend({ binary: ENGINE! }));
+  try {
+    await Promise.all(backends.map((backend, i) => backend.load(entry, { ...decision(), ctx_window: [1024, 1536, 2048][i] })));
+    assert.equal(new Set(backends.map((backend) => backend.port)).size, 3);
+    const props = await Promise.all(backends.map(async (backend) => (await fetch(`http://127.0.0.1:${backend.port}/props`)).json() as Promise<any>));
+    assert.equal(new Set(props.map((p) => p.model_alias)).size, 3, "readiness must identify the child, even for identical model files");
+    props.forEach((p, i) => {
+      assert.match(p.model_alias, /^localcoder-/);
+      assert.equal(p.default_generation_settings.n_ctx, [1024, 1536, 2048][i]);
+    });
+  } finally { await Promise.all(backends.map((backend) => backend.unload())); }
+});
+
 test("REAL finding: this llama-server refuses a quantized KV cache when the block size (32) does not divide head_dim — and the router never picks one for such a model", { skip }, async () => {
   assert.equal(entry.head_dim, 16);
   const b1 = new LlamaCppBackend({ binary: ENGINE! });
-  await assert.rejects(() => b1.load(entry, decision("q8_0")), /does not divide n_embd_head_k=16/);
+  try { await assert.rejects(() => b1.load(entry, decision("q8_0")), /does not divide n_embd_head_k=16/); }
+  finally { await b1.unload(); }
 
   // even when the policy asks for a q4_0 KV cache (low_memory) and the budget is tight, the router stays on f16 for head_dim 16
   const lowMem = { ...POLICY, power_mode: "low_memory" as const, memory_budget_gb: 3, max_context_tokens: 2048 };
@@ -106,9 +138,14 @@ test("REAL: with head_dim 32 the quantized KV caches (q8_0, q4_0) load AND gener
     const b = new LlamaCppBackend({ binary: ENGINE! });
     try {
       await b.load(e32, { ...decision(kv), model_id: e32.model_id });
-      let n = 0;
-      for await (const t of b.generate({ mode: "chat", messages: [{ role: "user", content: "hi" }] }, { max_tokens: 4 })) if (t.token) n++;
-      assert.ok(n >= 1, `${kv} KV cache generated tokens`);
+      let finish: string | undefined;
+      for await (const token of b.generate({ mode: "chat", messages: [{ role: "user", content: "hi" }] }, { max_tokens: 4 })) finish = token.finish_reason ?? finish;
+      assert.ok(finish === "length" || finish === "stop", `${kv} KV cache completed generation`);
+      const completion = await (await fetch(`http://127.0.0.1:${b.port}/v1/chat/completions`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], max_tokens: 4, ignore_eos: true, stream: false }),
+      })).json() as any;
+      assert.equal(completion.usage.completion_tokens, 4, `${kv} KV cache generated actual tokens`);
     } finally { await b.unload(); }
   }
   const d = new DefaultModelRouter().route("hard_agent", { ...POLICY, power_mode: "low_memory", memory_budget_gb: 3, max_context_tokens: 2048 }, [e32]);
@@ -167,7 +204,7 @@ test("REAL: the HTTP API serves real chat and FIM through the real router, manag
     const body = await chat.text();
     assert.ok(body.includes(entry.model_id), "chunks name the routed model");
     assert.ok(body.trim().endsWith("data: [DONE]"));
-    assert.ok((body.match(/"delta":\{"content":/g) ?? []).length >= 1, "real generated content was streamed");
+    assert.match(body, /"finish_reason":"(?:length|stop)"/, "the real generation terminates normally even when byte tokens yield no visible text");
 
     const fim = await fetch(`http://127.0.0.1:${s.port}/v1/completions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prefix: "def f():\n    return ", suffix: "\n", max_tokens: 5 }) });
     assert.equal(fim.status, 200);

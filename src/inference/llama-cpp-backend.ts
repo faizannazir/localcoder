@@ -1,15 +1,11 @@
 import { spawn, ChildProcess } from "child_process";
 import { existsSync } from "fs";
+import { randomUUID } from "crypto";
 import { locateLlamaServer } from "../util/paths";
 import type { InferenceBackend, ModelRegistryEntry, RoutingDecision, PromptPayload, GenParams, TokenEvent } from "../types/index";
 
 const HEALTH_POLL_INTERVAL_MS = 300;
 const HEALTH_TIMEOUT_MS = 60_000;
-const PORT_RANGE_START = 8090;
-const PORT_RANGE_END = 8189;
-
-let nextPortCandidate = PORT_RANGE_START;
-
 /** Every llama-server we spawned. If this process exits for any reason we can still run code for, they are killed — no orphans. */
 const liveProcs = new Set<ChildProcess>();
 let exitHookInstalled = false;
@@ -17,24 +13,6 @@ function installExitHook() {
   if (exitHookInstalled) return;
   exitHookInstalled = true;
   process.on("exit", () => { for (const p of liveProcs) { try { p.kill("SIGKILL"); } catch { /* already gone */ } } });
-}
-
-async function findFreePort(): Promise<number> {
-  const net = await import("net");
-  for (let attempt = 0; attempt < PORT_RANGE_END - PORT_RANGE_START; attempt++) {
-    const candidate = nextPortCandidate;
-    nextPortCandidate = nextPortCandidate >= PORT_RANGE_END ? PORT_RANGE_START : nextPortCandidate + 1;
-
-    const isFree = await new Promise<boolean>((resolve) => {
-      const tester = net
-        .createServer()
-        .once("error", () => resolve(false))
-        .once("listening", () => tester.close(() => resolve(true)))
-        .listen(candidate, "127.0.0.1");
-    });
-    if (isFree) return candidate;
-  }
-  throw new Error("No free port found in range for llama-server.");
 }
 
 /**
@@ -50,20 +28,21 @@ function gpuLayersFor(fraction: number): number {
   return Math.round(fraction * 40); // coarse guess for the partial-offload middle ground
 }
 
-async function waitForHealth(port: number, deadline: number): Promise<void> {
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
-      if (res.ok) {
-        const body = (await res.json()) as { status?: string };
-        if (body.status === "ok") return;
-      }
-    } catch {
-      /* server not up yet — keep polling */
+async function waitForHealth(port: () => number | null, alias: string, deadline: number, signal: AbortSignal): Promise<number> {
+  while (Date.now() < deadline && !signal.aborted) {
+    const candidate = port();
+    if (candidate) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${candidate}/health`, { signal });
+        if (res.ok && (await res.json() as { status?: string }).status === "ok") {
+          const props = await fetch(`http://127.0.0.1:${candidate}/props`, { signal });
+          if (props.ok && (await props.json() as { model_alias?: string }).model_alias === alias) return candidate;
+        }
+      } catch { /* the owned server may still be starting */ }
     }
-    await new Promise((r) => setTimeout(r, HEALTH_POLL_INTERVAL_MS));
+    if (!signal.aborted) await new Promise((resolve) => setTimeout(resolve, HEALTH_POLL_INTERVAL_MS));
   }
-  throw new Error(`llama-server on port ${port} did not become healthy within ${HEALTH_TIMEOUT_MS}ms.`);
+  throw new Error(`llama-server did not become healthy within ${HEALTH_TIMEOUT_MS}ms.`);
 }
 
 /** Shared parser for llama.cpp's SSE-ish "data: {...}\n\n" stream framing. */
@@ -117,10 +96,12 @@ export class LlamaCppBackend implements InferenceBackend {
       );
     }
 
-    const port = await findFreePort();
+    const alias = `localcoder-${randomUUID()}`;
+    let listeningPort: number | null = null;
     const args = [
       "--model", entry.file_path,
-      "--port", String(port),
+      "--port", "0", // the OS reserves an ephemeral port atomically; no cross-process check/spawn race
+      "--alias", alias,
       "--host", "127.0.0.1",
       "--ctx-size", String(decision.ctx_window),
       "--cache-ram", "0", // llama-server's default prompt cache may use up to 8192 MiB of host RAM, silently outside the memory budget the router enforced
@@ -135,7 +116,11 @@ export class LlamaCppBackend implements InferenceBackend {
     installExitHook();
     proc.once("exit", () => liveProcs.delete(proc));
     let startupLog = "";
-    const keepTail = (d: Buffer) => { startupLog = (startupLog + d.toString()).slice(-64_000); }; // pipes must keep draining; cap what is retained
+    const keepTail = (d: Buffer) => {
+      startupLog = (startupLog + d.toString()).slice(-64_000);
+      const listening = startupLog.match(/listening on http:\/\/127\.0\.0\.1:(\d+)/);
+      if (listening) listeningPort = Number(listening[1]);
+    }; // pipes must keep draining; cap what is retained
     proc.stdout?.on("data", keepTail);
     proc.stderr?.on("data", keepTail);
 
@@ -150,15 +135,15 @@ export class LlamaCppBackend implements InferenceBackend {
       );
     });
 
-    try {
-      await Promise.race([waitForHealth(port, Date.now() + HEALTH_TIMEOUT_MS), exitedEarly]);
-    } catch (err) {
-      proc.kill();
-      throw err;
-    }
-
     this.proc = proc;
-    this.port_ = port;
+    const polling = new AbortController();
+    const readinessSignal = AbortSignal.any([polling.signal, AbortSignal.timeout(HEALTH_TIMEOUT_MS)]);
+    try {
+      this.port_ = await Promise.race([waitForHealth(() => listeningPort, alias, Date.now() + HEALTH_TIMEOUT_MS, readinessSignal), exitedEarly]);
+    } catch (err) {
+      await this.unload();
+      throw err;
+    } finally { polling.abort(); }
   }
 
   async *generate(prompt: PromptPayload, params: GenParams): AsyncIterable<TokenEvent> {
@@ -222,10 +207,10 @@ export class LlamaCppBackend implements InferenceBackend {
     this.proc = null;
     this.port_ = null;
 
+    if (!proc.pid || proc.exitCode !== null || proc.signalCode !== null) return;
     await new Promise<void>((resolve) => {
       const timeout = setTimeout(() => {
         proc.kill("SIGKILL");
-        resolve();
       }, 5000);
       proc.once("exit", () => {
         clearTimeout(timeout);

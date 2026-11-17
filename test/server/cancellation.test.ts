@@ -15,12 +15,15 @@ test("disconnecting stalled chat and FIM streams releases their backend leases f
   writeFileSync(binary, `#!${process.execPath}
 const http = require('http');
 const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
-http.createServer((req, res) => {
+const alias = process.argv[process.argv.indexOf('--alias') + 1];
+const server = http.createServer((req, res) => {
   if (req.url === '/health') return res.end(JSON.stringify({ status: 'ok' }));
+  if (req.url === '/props') return res.end(JSON.stringify({ model_alias: alias }));
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
   const chunk = req.url === '/infill' ? { content: 'start' } : { choices: [{ delta: { content: 'start' } }] };
   res.write('data: ' + JSON.stringify(chunk) + '\\n\\n');
-}).listen(port, '127.0.0.1');
+});
+server.listen(port, '127.0.0.1', () => console.log('listening on http://127.0.0.1:' + server.address().port));
 `, { mode: 0o755 });
   mkdirSync(path.join(root, "registry"));
   const model = path.join(root, "model.gguf");
