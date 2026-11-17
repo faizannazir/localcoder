@@ -575,6 +575,7 @@ export class CodingAgent implements ICodingAgent {
     const views = yield* this.loadFocus(paths);
     const result = yield* this.askModel("reviewer", REVIEW_SYS, async () => [
       { id: "goal", text: this.state.goal, priority: 100, required: true },
+      { id: "review_scope", text: `Changed files (complete diff below): ${changed.join(", ") || "none"}.\nEligible file excerpts: ${views.map((v) => `${v.path} lines ${v.start}-${v.end} of ${v.total}`).join(", ") || "none"}.\nOmitted file excerpts: ${paths.filter((p) => !views.some((v) => v.path === p)).join(", ") || "none"}.\nFile excerpts may be absent or truncated to fit the model context. The complete diff is required; full-file coverage is not guaranteed. Reject with an actionable missing-context finding if this evidence is insufficient; do not claim to have reviewed unseen content.`, priority: 100, required: true },
       { id: "validation", text: `Verification: ${this.state.verification}.\n${this.state.validation?.summary ?? "No targeted validation recorded."}\n${this.state.observations.filter((o) => o.tool === "run_tests" || o.tool === "run_linter").slice(-4).map((o) => o.summary).join("\n")}\nWarnings: ${this.state.warnings.join("; ")}`, priority: 95, required: true },
       { id: "actual_diff", text: this.finalDiff(changed) || "No files changed.", priority: 90, required: true },
       { id: "files", text: this.renderFocus(views), priority: 80, shrinkable: true },
