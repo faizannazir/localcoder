@@ -1,8 +1,30 @@
 # Verification
 
+## Sequential workflow verified on 2026-11-18
+
+Typecheck and production build passed on macOS ARM64, Node.js 25.9.0, using the official llama.cpp `b12241` binary. The complete updated suite ran 181 tests: 179 passed, none failed or were canceled, and two skipped because the live safe-memory budget could not fit the fixture. Dependencies were already installed; this continuation did not repeat clean-install or Node 22 verification.
+
+New coverage includes exact configured model selection, per-role tokenizer/context fitting, one resident at a roomy budget, concurrent-request exclusion, queued cancellation, cancellation during startup and tokenization, resource-policy refresh after leases drain, reviewer rejection and coder repair, no-change review, failed full tests blocking approval, malformed review responses, persisted assignments, and resumed review validation, including targeted-only and syntax-only configurations after external edits. HTTP integration used three scripted role backends, actual file edits in a disposable repository, real `node --test` subprocesses, and persisted reviewer approval. The normal CLI entry point also completed all three roles using isolated HTTP engine fixtures and a fixed test hardware profile, with actual edits, test subprocesses, and saved approval. A separate CLI case exercised an honest constrained/mock-response failure. A separate smoke run repeated the successful three-role task against the compiled `dist/cli/index.js`, again with actual repository checks and persisted approval.
+
+The real-engine workflow test used three separate random-weight GGUF fixtures. Each role loaded, counted tokens, generated with actual engine token usage, and exited before the next process spawned. Peak live workflow model processes was **one**. The final record below includes the observed RSS and acquisition timings. Concurrent real backend loads also verified distinct OS-assigned ports and child aliases. This catches a discovered startup race where a backend could otherwise accept another process's health response.
+
+| Role | Acquisition (ms) | Observed RSS (MB) |
+| --- | ---: | ---: |
+| planner | 349 | 95.3 |
+| coder | 310 | 94.3 |
+| reviewer | 318 | 93.2 |
+
+Acquisition times come from a focused follow-up run; they are observations for tiny fixtures, not performance forecasts for trained models.
+
+Cancellation regressions cover stopping immediately after an announced edit, a stalled startup, and a stalled HTTP tokenizer; canceled work releases the model queue and child process. Edit and formatter regressions also force index refresh failures after successful writes, then verify retained backup metadata and actual undo. Reviewer scope tests use five real edited files to verify explicit omitted-context disclosure and a complete diff. Real upstream chat/FIM cancellation still releases leases and processes. Random byte-token fixtures can produce no visible text despite consuming generated tokens, so protocol checks use terminal events and engine usage rather than counting text fragments as tokens.
+
+An independent eight-lens code review, final validation, and focused follow-ups completed with no unresolved actionable findings. Fixes were recorded as separate timestamped commits.
+
+These checks establish workflow coordination and real process lifecycle. They do not establish trained-model planning, coding, or review quality. The live profiler reported high memory pressure (initial safe budget about 0.56 GB, later 0 GB), so the user-facing trained-model path was not forced past its memory gate. Full workflow correctness uses deterministic role replies with real repository validation; engine lifecycle tests use a fixed test profile to isolate switching from host memory fluctuations. Larger-than-memory models and selective tensor loading remain outside this implementation.
+
 ## Verified on 2026-11-15
 
-The current source passed clean dependency installation, strict type-checking, compilation, and the complete automated suite on macOS ARM64 with llama.cpp build `b12241`.
+The source at that date passed clean dependency installation, strict type-checking, compilation, and the complete automated suite on macOS ARM64 with llama.cpp build `b12241`.
 
 | Runtime | Tests | Passed | Failed | Skipped |
 | --- | --- | --- | --- | --- |

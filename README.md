@@ -105,6 +105,26 @@ The agent discovers `test`, `lint`, and `build` scripts from `package.json`. Con
 }
 ```
 
+To use separate models within one task, add all three role IDs from `localcoder models` to the same configuration:
+
+```json
+{
+  "models": {
+    "planner": "your-planner-model-id",
+    "coder": "your-coder-model-id",
+    "reviewer": "your-reviewer-model-id"
+  },
+  "test": ["node", "--test"],
+  "test_target": ["node", "--test", "{file}"]
+}
+```
+
+The CLI and `/v1/agent/run` use this configuration. The planner prepares a compact plan; the coder edits and runs checks; the reviewer receives bounded current-file excerpts, the complete task diff, and validation evidence. Review prompts disclose omitted excerpts and possible truncation. Rejected reviews return actionable findings to the bounded repair loop. Configured tests must pass before reviewer approval can complete the task, including when the coder proposes no changes.
+
+Each role loads alone and unloads before the next role or queued inference request can use the manager. Context assembly and token counting use that role's model and context limit. The hardware gate runs again before each load. This reduces simultaneous model memory; each complete model and its cache must still fit the current safe budget. Assigning the same installed ID to several roles is supported, with a fresh load for each call. CLI `model:` lines and API `model` events show the selected role and ID.
+
+Saved workflow tasks retain their assignments on resume. Removing `models` from current configuration does not bypass a saved review. Workspaces without `models` keep the single-model workflow, and older saved tasks resume in that mode.
+
 Each run reports its verification level. Undo checks for later file changes and preserves completed rollback progress across retries. Project commands execute with the current user's permissions. The path jail and command allowlist operate at the application level, and repository scripts can access resources available to that user.
 
 ## Verify and test

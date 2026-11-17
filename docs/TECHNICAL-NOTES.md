@@ -195,3 +195,14 @@ Atomic file replacement uses an exclusively created temporary file and preserves
 Undo journals persist rollback progress per edit so partial conflicts and interrupted index refreshes can be retried. HTTP cancellation begins when the request is accepted and propagates through queued agent work and upstream inference streams. Command timeouts terminate the subprocess tree and bound pipe cleanup.
 
 On macOS, available-memory estimation includes free and reclaimable file-backed pages from `vm_stat`. Anonymous, wired, and compressed pages stay outside this estimate. Failed probes retain the conservative free-memory fallback. The existing operating-system reserve and model-routing safety margins still apply.
+
+
+## Model workflow and process ownership
+
+A workflow role must own model residency while constructing context, counting tokens, and generating. Holding a legacy whole-run lease prevents the next role from unloading that backend. Releasing residency before token counting finishes can route the prompt through an unloaded tokenizer. The exclusive manager callback therefore covers the entire role operation and unloads before releasing its queue; hardware selection happens inside that queue after older leases drain.
+
+A successful health response does not establish ownership of a spawned server. Probing a free port and closing the probe before spawning created a cross-process race in real tests. Backend startup now requests an OS-assigned port, reads the listening address from its own child, and checks a unique child alias in `/props`. Regression tests load several backends concurrently and verify ports, identities, and contexts.
+
+Random byte-token fixtures can consume their requested generation budget while emitting zero visible text. Streaming fragments are not generated-token counts; protocol tests verify completion events and the engine's usage fields instead. Trained-model quality requires a separate trained-model evaluation.
+
+After a successful file mutation, an index refresh error must not turn the result into an unjournaled failed edit. File and formatter operations preserve backup/hash metadata and return a bounded, redacted warning when indexing fails; the agent can still journal and undo the actual write. Regression tests cover both operations and restore the original file.

@@ -5,6 +5,8 @@
 ```bash
 localcoder serve [--port 8080] [--backend llama|mock]
 localcoder doctor
+localcoder agent "<task>" [--session <id>] [--resume <task_id>]
+localcoder undo [task_id] [--force]
 localcoder models [add <file.gguf> | remove <id>]
 localcoder verify [--model <file.gguf>] [--llama-server <path>] [--skip-agent] [--json-trials N] [--agent-seconds N]
 ```
@@ -120,3 +122,15 @@ HTTP: `POST /v1/agent/run {"task": "...", "session_id"?, "resume_task_id"?}` str
 Without a configured test command the agent can only do a built-in syntax check (JS/Python) and will report `verification: syntax_only` or `none` — it does not claim the change is tested.
 
 **Evaluate a trained model.** install `llama-server`, download a model from `registry/models.json` that fits `localcoder doctor`, then run `localcoder agent "<small task>"` in a throwaway git repo and review the printed diff. Expect small local models to sometimes produce invalid edit JSON; the agent retries once, then stops with a resumable error.
+
+## Planner, coder, and reviewer workflow
+
+Set `models.planner`, `models.coder`, and `models.reviewer` in the workspace's `.localcoder/agent.json` to installed IDs shown by `localcoder models`. All three IDs are required; the same ID may serve several roles. The [README configuration example](../README.md#work-with-a-repository) shows the complete mapping.
+
+Run `localcoder agent "<task>"` or POST a task to `/v1/agent/run`. Each model event identifies the requested role and model. The agent loads one model, constructs and counts its prompt, generates, and unloads it before using another model. Concurrent requests wait while a role is active. Files, compact plans, observed checks, and diffs carry context between roles rather than replaying a complete chat transcript.
+
+Review includes a complete task diff and up to four current-file excerpts. Required scope information identifies omitted excerpts and warns about truncation; reviewers must reject insufficient evidence rather than claim unseen file coverage. The reviewer cannot propose executable tools or file edits. Rejections feed the coder's existing repair limit, after which validation and review repeat. A failed or unavailable configured full test command prevents workflow completion. Without configured tests, the reported verification level remains targeted, syntax only, or none, even when a reviewer approves.
+
+Use `localcoder agent "continue"` or `--resume <task_id>` after an interruption. Saved model assignments take precedence over current role configuration; interrupted reviews rerun validation. Cancellation and malformed model output preserve a resumable error instead of assuming approval. Undo remains available without loading a model.
+
+Every selected model must fit the hardware policy individually. Sequential loading does not make an oversized model fit, and this workflow does not implement selective tensor loading. Real random-weight fixture tests verify engine switching and process cleanup; trained-model planning, editing, and review quality require separate evaluation with suitable installed models.
