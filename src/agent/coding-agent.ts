@@ -84,7 +84,13 @@ export class CodingAgent implements ICodingAgent {
         if (JSON.stringify(savedModels) !== JSON.stringify(configuredModels)) throw new Error("saved model workflow does not match this session; resume using the saved role assignments");
         this.state.status = "running";
         this.state.error = undefined;
-        if (this.state.phase === "REVIEW") transition(this.state, "VERIFY");
+        if (this.state.phase === "REVIEW") {
+          this.state.review = undefined;
+          this.state.verification = "none";
+          this.state.ran_targeted_ok = false;
+          this.state.ran_lint_ok = false;
+          transition(this.state, "TEST");
+        }
       } else {
         this.state = newState(req.task, req.session_id ?? `s_${Date.now().toString(36)}`);
         if (this.d.modelWorkflow) this.state.models = { ...this.d.modelWorkflow.models };

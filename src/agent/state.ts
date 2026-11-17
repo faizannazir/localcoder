@@ -18,7 +18,7 @@ export const TRANSITIONS: Record<AgentPhase, AgentPhase[]> = {
   OBSERVE: ["FIX", "VERIFY", "FAILED"],
   FIX: ["TEST", "FIX", "FAILED"],
   VERIFY: ["DONE", "REVIEW", "FIX", "FAILED"],
-  REVIEW: ["DONE", "FIX", "VERIFY", "FAILED"],
+  REVIEW: ["DONE", "FIX", "TEST", "FAILED"],
   DONE: [],
   FAILED: [],
 };

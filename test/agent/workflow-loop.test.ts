@@ -100,7 +100,7 @@ test("contradictory review interrupts after bounded retries and resumes saved re
     const resumedEvents = await collect(resumed.agent.run({ task: "continue", resume_task_id: taskId }));
     assert.ok(resumedEvents.find((e) => e.type === "done")?.success);
     assert.deepEqual(resumed.roles, ["reviewer"]);
-    assert.equal(resumedEvents.filter((e) => e.type === "tool_result" && e.name === "run_tests").length, 1, "review resume reruns the full suite against the current workspace");
+    assert.equal(resumedEvents.filter((e) => e.type === "tool_result" && e.name === "run_tests").length, 2, "review resume reruns targeted checks and the full suite against the current workspace");
     assert.deepEqual(resumed.agent.currentState.models, models);
     assert.equal(resumed.agent.currentState.edits.length, 1, "does not repeat applied edits");
   } finally { repo.cleanup(); }
