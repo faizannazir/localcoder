@@ -66,3 +66,20 @@ test("new tasks use configuration while resumed tasks use saved roles or legacy 
     assert.equal(prepared.request.resume_task_id, saved.task_id);
   } finally { repo.cleanup(); }
 });
+
+test("queued cancellation never loads a role; resource gates refresh after prior leases drain", async () => {
+  const d = deps();
+  const routed = d.router.route("hard_agent", d.policyEngine.derive(FAKE_PROFILE), registry);
+  assert.ok(!("rejected" in routed));
+  if ("rejected" in routed) return;
+  const lease = await d.modelManager.acquire(routed, d.policyEngine.derive(FAKE_PROFILE));
+  const controller = new AbortController();
+  const workflow = new SequentialModelWorkflow(d, models, controller.signal);
+  const pending = workflow.withRole("coder", async () => assert.fail("canceled role cannot execute"));
+  const rejection = assert.rejects(pending, /aborted/);
+  controller.abort(); lease.release(); await rejection;
+  assert.equal(d.modelManager.resident().length, 0);
+  d.profiler.sample = async () => ({ ...FAKE_PROFILE, memory_budget_gb: 0.5 });
+  await assert.rejects(new SequentialModelWorkflow(d, models).withRole("reviewer", async () => assert.fail("unfit role cannot execute")), /reviewer model/);
+  assert.equal(d.modelManager.resident().length, 0);
+});

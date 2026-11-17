@@ -38,14 +38,14 @@ export class DefaultModelManager implements IModelManager {
 
   /** Holds the queue through tokenization/generation; callbacks must not call the manager. */
   withExclusiveModel<T>(select: () => Promise<{ decision: RoutingDecision; policy: ResourcePolicy }>,
-    operation: (model: { loaded: LoadedModel; backend: InferenceBackend }) => Promise<T>): Promise<T> {
+    operation: (model: { loaded: LoadedModel; backend: InferenceBackend; decision: RoutingDecision; policy: ResourcePolicy }) => Promise<T>): Promise<T> {
     return this.exclusive(async () => {
       // Reload even the same ID so context and KV settings match this decision.
       for (const id of [...this.residents.keys()]) await this.unloadResident(id);
       const { decision, policy } = await select();
       const loaded = await this.ensureResident(decision, policy, 8);
       const backend = this.residents.get(loaded.model_id)!.backend;
-      try { return await operation({ loaded, backend }); }
+      try { return await operation({ loaded, backend, decision, policy }); }
       finally { await this.unloadResident(loaded.model_id); }
     });
   }

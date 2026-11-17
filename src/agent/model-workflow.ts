@@ -38,19 +38,16 @@ export class SequentialModelWorkflow implements AgentModelWorkflow {
   }
   async withRole<T>(role: ModelRole, operation: (model: RoleModel) => Promise<T>): Promise<T> {
     const checkAbort = () => { if (this.signal?.aborted) throw new Error("run aborted (client disconnected)"); };
-    let selected!: { decision: RoutingDecision; policy: ResourcePolicy };
     return this.deps.modelManager.withExclusiveModel(async () => {
       checkAbort();
       // Sample after previous leases/processes have drained, immediately before loading.
       const result = await routeRole(this.deps, this.models, role);
       if (!result.ok) throw new Error(result.message);
       checkAbort();
-      selected = { decision: result.decision, policy: result.policy };
-      return selected;
-    }, async ({ backend }) => {
+      return { decision: result.decision, policy: result.policy };
+    }, async ({ backend, decision, policy }) => {
       checkAbort();
-      // The selection is captured below so the active backend and prompt share one decision.
-      return operation({ backend, ...selected, tokenCounter: new BackendTokenCounter(backend) });
+      return operation({ backend, decision, policy, tokenCounter: new BackendTokenCounter(backend) });
     });
   }
 }
@@ -61,9 +58,9 @@ export async function prepareAgentRun(root: string, request: AgentRequest, deps:
 }> {
   const config = loadAgentConfig(root);
   const store = new AgentStateStore(root);
-  const resumeId = request.resume_task_id ?? (/^\s*(continue|keep going|finish (this|it)|resume|carry on)\b/i.test(request.task) ? store.latestResumable()?.task_id : undefined);
+  const resumeId = store.resolveResumeId(request);
   const saved = resumeId ? store.load(resumeId) : undefined;
-  const storedModels = saved ? (saved as { models?: AgentModels }).models : config.models;
+  const storedModels = saved ? saved.models : config.models;
   const models = storedModels === undefined ? undefined : parseAgentModels(storedModels);
   const resolved = { ...request, resume_task_id: resumeId };
   if (!models) return { request: resolved, config, preflight: await preflightAgent(deps) };

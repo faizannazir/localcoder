@@ -1,10 +1,11 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdirSync } from "fs";
 import path from "path";
 import { randomBytes } from "crypto";
-import type { Verification } from "../types/index";
+import type { AgentModels } from "./config";
+import type { AgentRequest, Verification } from "../types/index";
 import { agentDir } from "./workdir";
 
-export type AgentPhase = "PLAN" | "SEARCH" | "READ" | "REASON" | "EDIT" | "TEST" | "OBSERVE" | "FIX" | "VERIFY" | "DONE" | "FAILED";
+export type AgentPhase = "PLAN" | "SEARCH" | "READ" | "REASON" | "EDIT" | "TEST" | "OBSERVE" | "FIX" | "VERIFY" | "REVIEW" | "DONE" | "FAILED";
 export type AgentStatus = "running" | "interrupted" | "done" | "failed";
 
 export const TRANSITIONS: Record<AgentPhase, AgentPhase[]> = {
@@ -16,7 +17,8 @@ export const TRANSITIONS: Record<AgentPhase, AgentPhase[]> = {
   TEST: ["OBSERVE", "FAILED"],
   OBSERVE: ["FIX", "VERIFY", "FAILED"],
   FIX: ["TEST", "FIX", "FAILED"],
-  VERIFY: ["DONE", "FIX", "FAILED"],
+  VERIFY: ["DONE", "REVIEW", "FIX", "FAILED"],
+  REVIEW: ["DONE", "FIX", "VERIFY", "FAILED"],
   DONE: [],
   FAILED: [],
 };
@@ -45,9 +47,17 @@ export interface ProposedEdit {
 
 export interface Observation { id: number; tool: string; ok: boolean; summary: string; ref?: string; repeat_of?: number }
 
-export interface ValidationResult { stage: "lint" | "targeted"; ok: boolean; summary: string; ref?: string; skipped: string[] }
+export interface ValidationResult { stage: "lint" | "targeted" | "review"; ok: boolean; summary: string; ref?: string; skipped: string[] }
+
+export interface ReviewResult {
+  approved: boolean;
+  summary: string;
+  findings: { path: string; line?: number; message: string }[];
+}
 
 export interface AgentState {
+  models?: AgentModels;
+  review?: ReviewResult;
   version: 1;
   task_id: string;
   session_id: string;
@@ -111,6 +121,10 @@ export function transition(state: AgentState, next: AgentPhase): void {
 export class AgentStateStore {
   private dir: string;
   constructor(root: string) { this.dir = path.join(agentDir(root), "state"); }
+
+  resolveResumeId(request: AgentRequest): string | undefined {
+    return request.resume_task_id ?? (/^\s*(continue|keep going|finish (this|it)|resume|carry on)\b/i.test(request.task) ? this.latestResumable()?.task_id : undefined);
+  }
 
   private file(id: string): string {
     if (!/^t_[A-Za-z0-9_]+$/.test(id)) throw new Error("invalid task id");

@@ -455,6 +455,7 @@ export type Verification = "full" | "targeted" | "syntax_only" | "none";
 
 // Phase 2: the Phase 0 placeholders for AgentEvent/CodingAgent were unused stubs; reshaped here.
 export type AgentEvent =
+  | { type: "model"; task_id: string; phase: string; role: "planner" | "coder" | "reviewer"; model_id: string }
   | { type: "plan"; task_id: string; phase: string; steps: string[] }
   | { type: "tool_call"; task_id: string; phase: string; id: number; name: string; args: unknown }
   | { type: "tool_result"; task_id: string; phase: string; id: number; name: string; result: ToolResult }
