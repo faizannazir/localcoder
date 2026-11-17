@@ -112,3 +112,53 @@ test("an active model lease prevents eviction until the request releases it", as
   next.release();
   await manager.unloadAll();
 });
+
+test("exclusive model work blocks ordinary acquisitions at roomy budgets and unloads on failure", async () => {
+  const manager = new DefaultModelManager(registry, () => new MockInferenceBackend());
+  const roomy = { ...lowMemPolicy(), memory_budget_gb: 32 };
+  await manager.ensure(decisionFor("b"), roomy);
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const work = manager.withExclusiveModel(decisionFor("a"), roomy, async ({ backend }) => {
+    assert.equal(manager.resident().length, 1);
+    assert.equal(manager.getBackend("b"), undefined);
+    assert.equal(manager.getBackend("a"), backend);
+    entered();
+    await gate;
+    throw new Error("generation failed");
+  });
+  const failure = assert.rejects(work, /generation failed/);
+  await started;
+  let acquired = false;
+  const pending = manager.acquire(decisionFor("b"), roomy).then((lease) => { acquired = true; return lease; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(acquired, false);
+  assert.deepEqual(manager.resident().map((r) => r.model_id), ["a"]);
+  finish();
+  await failure;
+  const lease = await pending;
+  assert.deepEqual(manager.resident().map((r) => r.model_id), ["b"]);
+  lease.release();
+  await manager.unloadAll();
+  assert.equal(manager.resident().length, 0);
+});
+
+test("exclusive work waits for leases and reloads the same ID with its requested settings", async () => {
+  const decisions: RoutingDecision[] = [];
+  class RecordedBackend extends MockInferenceBackend {
+    async load(entry: ModelRegistryEntry, decision: RoutingDecision) { decisions.push(decision); await super.load(entry, decision); }
+  }
+  const manager = new DefaultModelManager(registry, () => new RecordedBackend());
+  const first = await manager.acquire(decisionFor("a"), lowMemPolicy());
+  const next = { ...decisionFor("a"), ctx_window: 2048, kv_cache_dtype: "f16" as const };
+  let entered = false;
+  const work = manager.withExclusiveModel(next, lowMemPolicy(), async () => { entered = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(entered, false);
+  first.release();
+  await work;
+  assert.deepEqual(decisions, [decisionFor("a"), next]);
+  assert.equal(manager.resident().length, 0);
+});
