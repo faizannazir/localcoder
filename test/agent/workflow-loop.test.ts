@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import path from "path";
 import { CodingAgent, AgentDeps } from "../../src/agent/coding-agent";
 import { AgentStateStore } from "../../src/agent/state";
@@ -8,6 +8,7 @@ import { loadAgentConfig, ModelRole } from "../../src/agent/config";
 import { DefaultToolRuntime } from "../../src/agent/tool-runtime";
 import type { AgentModelWorkflow } from "../../src/agent/model-workflow";
 import { BackendTokenCounter } from "../../src/context/token-counter";
+import { agentDir, hashText } from "../../src/agent/workdir";
 import { makeRepo, Repo, ScriptedBackend, POLICY, DECISION, PLAN_JSON, collect } from "./helpers";
 
 const models = { planner: "plan", coder: "code", reviewer: "review" };
@@ -63,6 +64,56 @@ test("discovery deduplicates search terms and review reuses only unchanged file 
     const calls = events.filter((e) => e.type === "tool_call");
     assert.equal(calls.filter((e) => e.name === "search" || e.name === "find_symbol").length, 3);
     assert.deepEqual(calls.filter((e) => e.name === "read_file" && e.phase === "REVIEW").map((e) => (e.args as { path: string }).path), ["calc.js", "util.js"]);
+  } finally { repo.cleanup(); }
+});
+
+test("an agent deletes only the authorized file, verifies, and can restore bytes and mode", async () => {
+  const original = "// Obsolete helper\n";
+  const repo = await makeRepo({ buggy: false, extra: { "obsolete.js": original, ".env": "PRIVATE=example" } });
+  try {
+    const target = path.join(repo.root, "obsolete.js");
+    if (process.platform !== "win32") chmodSync(target, 0o751);
+    const s = setup(repo, (role, prompt) => {
+      if (role === "planner") return PLAN_JSON;
+      if (role === "reviewer") {
+        assert.match(prompt, /--- a\/obsolete\.js\n\+\+\+ \/dev\/null/);
+        return approved;
+      }
+      return JSON.stringify({ reasoning: "Remove obsolete files", edits: [
+        { op: "delete", path: ".env" },
+        { op: "delete", path: "obsolete.js" },
+      ] });
+    }, { deletePath: "obsolete.js" });
+    const events = await collect(s.agent.run({ task: "Remove obsolete.js" }));
+    assert.ok(events.find((event) => event.type === "done")?.success);
+    assert.deepEqual(s.agent.currentState.edits.map((e) => e.path), ["obsolete.js"]);
+    assert.equal(existsSync(target), false);
+    assert.equal(existsSync(path.join(repo.root, ".env")), true);
+    assert.equal(await repo.store.getFile("obsolete.js"), null);
+    assert.equal(events.filter((event) => event.type === "tool_result" && event.name === "delete_file" && !event.result.ok).length, 1);
+
+    writeFileSync(target, "new content");
+    const taskId = s.agent.currentState.task_id;
+    assert.equal((await s.agent.undo(taskId)).conflicts.length, 1);
+    assert.equal(readFileSync(target, "utf8"), "new content");
+    assert.deepEqual((await s.agent.undo(taskId, { force: true })).restored, ["obsolete.js"]);
+    assert.equal(readFileSync(target, "utf8"), original);
+    if (process.platform !== "win32") assert.equal(statSync(target).mode & 0o777, 0o751);
+    assert.equal((await repo.store.getFile("obsolete.js"))?.content, original);
+  } finally { repo.cleanup(); }
+});
+
+test("deletion refuses a corrupt pre-existing backup and preserves the original file", async () => {
+  const original = "Keep this file until a valid backup exists.\n";
+  const repo = await makeRepo({ extra: { "obsolete.txt": original } });
+  try {
+    const backupDir = path.join(agentDir(repo.root), "backups");
+    mkdirSync(backupDir, { recursive: true });
+    writeFileSync(path.join(backupDir, hashText(original)), "invalid backup");
+    const s = setup(repo, () => { throw new Error("direct deletion needs no inference"); });
+    await assert.rejects(s.agent.deleteFile("obsolete.txt"), /does not match its recorded hash/);
+    assert.equal(readFileSync(path.join(repo.root, "obsolete.txt"), "utf8"), original);
+    assert.equal(new AgentStateStore(repo.root).latestWithEdits(), null);
   } finally { repo.cleanup(); }
 });
 

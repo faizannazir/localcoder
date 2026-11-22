@@ -9,7 +9,7 @@ LocalCoder runs a local coding assistant backed by llama.cpp. It combines hardwa
 - Streams chat responses and fill-in-middle code completions over HTTP.
 - Indexes repository files in SQLite and extracts JavaScript, TypeScript, and Python symbols with heuristic parsers.
 - Assembles context within a token budget using search results, project memory, task state, and cached summaries.
-- Applies targeted edits, runs validation, saves interrupted tasks, and supports conflict-aware undo.
+- Creates files, applies targeted edits, removes explicitly authorized files, runs validation, and supports conflict-aware undo.
 
 ## Install
 

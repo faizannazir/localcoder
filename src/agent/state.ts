@@ -25,9 +25,10 @@ export const TRANSITIONS: Record<AgentPhase, AgentPhase[]> = {
 
 export interface EditRecord {
   path: string;
-  op: "patch" | "replace" | "write" | "format";
+  op: "patch" | "replace" | "write" | "format" | "delete";
   before_hash: string | null;
-  after_hash: string;
+  after_hash: string | null;
+  before_mode?: number;
   backup_ref: string | null;
   step: number;
   /** Persist rollback intent before touching disk, then completion after index refresh. */
@@ -35,7 +36,7 @@ export interface EditRecord {
 }
 
 export interface ProposedEdit {
-  op: "patch" | "replace" | "write";
+  op: "patch" | "replace" | "write" | "delete";
   path: string;
   patch?: string;
   old_text?: string;

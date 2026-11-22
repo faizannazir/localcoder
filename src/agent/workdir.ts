@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "crypto";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, renameSync, statSync, openSync, closeSync, fchmodSync, unlinkSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, renameSync, statSync, openSync, closeSync, fchmodSync, unlinkSync, constants, lstatSync, fstatSync, linkSync } from "fs";
 import path from "path";
 import type { BigIntStats } from "fs";
 
@@ -14,13 +14,31 @@ export function storeBackup(root: string, content: string): string {
   const dir = path.join(agentDir(root), "backups");
   mkdirSync(dir, { recursive: true });
   const f = path.join(dir, h);
-  if (!existsSync(f)) writeFileSync(f, content);
+  if (!lstatSync(f, { throwIfNoEntry: false })) {
+    const temp = path.join(dir, `.backup-${randomBytes(16).toString("hex")}`);
+    const fd = openSync(temp, "wx", 0o600);
+    try {
+      try { writeFileSync(fd, content); } finally { closeSync(fd); }
+      try { linkSync(temp, f); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+    } finally { unlinkSync(temp); }
+  }
+  loadBackup(root, h);
   return h;
 }
 
 export function loadBackup(root: string, ref: string): string {
   if (!/^[a-f0-9]{64}$/.test(ref)) throw new Error("invalid backup reference");
-  return readFileSync(path.join(agentDir(root), "backups", ref), "utf8");
+  const file = path.join(agentDir(root), "backups", ref);
+  const stat = lstatSync(file, { bigint: true });
+  if (!stat.isFile()) throw new Error("Backup is not a regular file.");
+  const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    if (fileVersion(fstatSync(fd, { bigint: true })) !== fileVersion(stat)) throw new Error("Backup changed before it could be read.");
+    const bytes = readFileSync(fd);
+    if (createHash("sha256").update(bytes).digest("hex") !== ref) throw new Error("Backup content does not match its recorded hash.");
+    return bytes.toString("utf8");
+  } finally { closeSync(fd); }
 }
 
 /** Full command output kept on disk (already secret-redacted, capped) so tool results can carry a short reference instead of raw text. */
@@ -34,11 +52,13 @@ export function storeOutput(root: string, text: string): string {
   return h;
 }
 
-export function writeAtomic(abs: string, content: string): void {
+export function writeAtomic(abs: string, content: string, restoreMode?: number): void {
   mkdirSync(path.dirname(abs), { recursive: true });
   const tmp = `${abs}.lc-tmp-${randomBytes(16).toString("hex")}`;
-  let mode: number | undefined;
-  try { mode = statSync(abs).mode; } catch { /* new file */ }
+  let mode = restoreMode;
+  if (mode === undefined) {
+    try { mode = statSync(abs).mode; } catch { /* new file */ }
+  }
   const fd = openSync(tmp, "wx");
   try {
     try {

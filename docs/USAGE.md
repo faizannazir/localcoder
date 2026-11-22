@@ -7,7 +7,8 @@ localcoder serve [--background] [--port 8080] [--backend llama|mock]
 localcoder start [--port 8080] [--backend llama|mock]
 localcoder status | stop | restart
 localcoder doctor
-localcoder agent "<task>" [--model <id>] [--session <id>] [--resume <task_id>]
+localcoder agent "<task>" [--model <id>] [--delete-file <path>] [--session <id>] [--resume <task_id>]
+localcoder files delete <path>
 localcoder undo [task_id] [--force]
 localcoder models list [--downloaded]
 localcoder models download <id>
@@ -26,6 +27,18 @@ localcoder verify [--model <file.gguf>] [--llama-server <path>] [--skip-agent] [
 - **`models`** — lists catalog and custom models with their size, context window, and download status. See the [model download and sizing guide](MODELS.md).
 
 For a one-model task, pick an installed ID from `localcoder models list` and run `localcoder agent "Fix the failing parser test" --model <id>`. This overrides the project’s role configuration for the run. Repeat the flag when resuming that task to keep the same model. A task with saved planner, coder, and reviewer assignments resumes with those assignments.
+
+### File operations
+
+The coding agent can search and read workspace files, create files, apply targeted edits, and run configured checks. To authorize the agent to remove one named file, pass `--delete-file` with its path. Repeat the flag if resuming a deletion task. To delete a file directly without loading a model, use `localcoder files delete <path>`.
+
+```bash
+localcoder agent "Remove the obsolete helper and update its callers" --delete-file src/obsolete.js
+localcoder files delete drafts/obsolete.txt
+localcoder undo <task_id>
+```
+
+Deletion supports regular UTF-8 workspace files up to 512 KB. LocalCoder keeps a backup for undo, refuses protected paths and symlinks, and checks for conflicts before overwriting a file recreated after deletion.
 
 With the server running, `localcoder run <id> "<prompt>"` sends a chat request from the terminal. Use `models load <id>` to warm a model, `models ps` to see what is in memory, and `models unload <id>` to release it after active requests finish. Unloading leaves the weights on disk. Pass `--port <port>` when the server uses a different port.
 

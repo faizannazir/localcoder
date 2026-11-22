@@ -3,6 +3,9 @@ import { buildContext } from "../server/index";
 import { prepareAgentRun, SequentialModelWorkflow } from "../agent/model-workflow";
 import { openAgentSession, tryLockRepo, unlockRepo } from "../agent/session";
 import { AgentStateStore } from "../agent/state";
+import { checkDeletionStorage, deletionPath } from "../agent/file-deletion";
+import { Sandbox } from "../agent/sandbox";
+import { IgnoreRules } from "../index/ignore";
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -16,8 +19,15 @@ export async function runAgent(args: string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  const file = flag(args, "--delete-file");
+  if (args.includes("--delete-file") && (!file || file.startsWith("--") || args.lastIndexOf("--delete-file") !== args.indexOf("--delete-file"))) {
+    throw new Error("--delete-file requires exactly one workspace file path.");
+  }
   const task = args.find((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1].startsWith("--")));
-  if (!task) { console.log('Usage: localcoder agent "<task>" [--model <id>] [--session <id>] [--resume <task_id>] [--backend llama|mock]'); process.exitCode = 1; return; }
+  if (!task) { console.log('Usage: localcoder agent "<task>" [--model <id>] [--delete-file <path>] [--session <id>] [--resume <task_id>] [--backend llama|mock]'); process.exitCode = 1; return; }
+  const root = process.cwd();
+  const deletePath = file ? deletionPath(new Sandbox(root, new IgnoreRules(root)), file).rel : undefined;
+  if (deletePath) checkDeletionStorage(root);
   const ctx = buildContext({ backend: flag(args, "--backend") as "llama" | "mock" | undefined });
   let prepared;
   try { prepared = await prepareAgentRun(ctx.repoRoot, { task, session_id: flag(args, "--session"), resume_task_id: flag(args, "--resume") }, ctx, modelId); }
@@ -34,7 +44,7 @@ export async function runAgent(args: string[]): Promise<void> {
     }
     session = await openAgentSession({ root: ctx.repoRoot, backend,
       modelWorkflow: prepared.models ? new SequentialModelWorkflow(ctx, prepared.models) : undefined,
-      config: prepared.config, policy: pre.policy, decision: pre.decision });
+      config: prepared.config, policy: pre.policy, decision: pre.decision, deletePath });
     console.log(`${prepared.models ? "workflow: planner → coder → reviewer" : `model: ${pre.decision.model_id}`}  power: ${pre.policy.power_mode}  repo: ${ctx.repoRoot}${session.indexedNow ? "  (indexed now, one-shot)" : ""}`);
     let failed = false;
     for await (const ev of session.agent.run(prepared.request)) {
@@ -67,9 +77,7 @@ export async function runUndo(args: string[]): Promise<void> {
   const store = new AgentStateStore(root);
   const taskId = args.find((a) => !a.startsWith("--")) ?? store.latestWithEdits()?.task_id;
   if (!taskId) { console.log("No agent task with edits to undo."); return; }
-  const stub = { load: async () => {}, generate: async function* () {}, unload: async () => {}, tokenize: async () => [], countTokens: async () => 0 };
-  const policy = { power_mode: "balanced" as const, memory_budget_gb: 0, max_context_tokens: 0, max_gpu_offload_fraction: 0, max_agent_wall_seconds: 60, max_tool_calls: 1, allow_background_indexing: false };
-  const session = await openAgentSession({ root, backend: stub, policy, decision: { model_id: "none", ctx_window: 0, kv_cache_budget_mb: 0, kv_cache_dtype: "f16", max_output_tokens: 0, gpu_offload_fraction: 0 } });
+  const session = await openFileSession(root);
   try {
     const r = await session.agent.undo(taskId, { force: args.includes("--force") });
     if (r.already_undone) console.log(`Task ${taskId} was already undone.`);
@@ -78,5 +86,24 @@ export async function runUndo(args: string[]): Promise<void> {
       for (const c of r.conflicts) console.log(`  conflict ${c.path}: ${c.reason}`);
       if (r.conflicts.length) process.exitCode = 1;
     }
+  } finally { session.close(); }
+}
+
+function openFileSession(root: string) {
+  checkDeletionStorage(root);
+  const backend = { load: async () => {}, generate: async function* () {}, unload: async () => {}, tokenize: async () => [], countTokens: async () => 0 };
+  const policy = { power_mode: "balanced" as const, memory_budget_gb: 0, max_context_tokens: 0, max_gpu_offload_fraction: 0, max_agent_wall_seconds: 60, max_tool_calls: 1, allow_background_indexing: false };
+  return openAgentSession({ root, backend, config: {}, indexIfEmpty: false, policy, decision: { model_id: "none", ctx_window: 0, kv_cache_budget_mb: 0, kv_cache_dtype: "f16", max_output_tokens: 0, gpu_offload_fraction: 0 } });
+}
+
+export async function runFiles(args: string[]): Promise<void> {
+  if (args.length !== 2 || args[0] !== "delete") throw new Error("Usage: localcoder files delete <path>");
+  const root = process.cwd();
+  deletionPath(new Sandbox(root, new IgnoreRules(root)), args[1]);
+  const session = await openFileSession(root);
+  try {
+    const result = await session.agent.deleteFile(args[1]);
+    console.log(`Deleted ${result.path}. Restore with localcoder undo ${result.taskId}`);
+    if (result.warning) console.warn(result.warning);
   } finally { session.close(); }
 }

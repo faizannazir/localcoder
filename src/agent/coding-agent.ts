@@ -17,6 +17,7 @@ import { fileVersion, hashText, loadBackup, writeAtomic } from "./workdir";
 import { AgentConfig, ModelRole, parseAgentModels } from "./config";
 import type { AgentModelWorkflow, RoleModel } from "./model-workflow";
 import { EstimatingTokenCounter } from "../context/token-counter";
+import { deleteWorkspaceFile, deletionPath } from "./file-deletion";
 
 class LimitError extends Error {}
 class AbortError extends Error {}
@@ -42,6 +43,7 @@ export interface AgentDeps {
   decision: RoutingDecision;
   stateStore: AgentStateStore;
   config: AgentConfig;
+  deletePath?: string;
   now?: () => number;
   aborted?: () => boolean;
   signal?: AbortSignal;
@@ -163,9 +165,54 @@ export class CodingAgent implements ICodingAgent {
     for (const [k, v] of Object.entries(args)) preview[k] = typeof v === "string" && v.length > 300 ? v.slice(0, 300) + `…(${v.length} chars)` : v;
     yield { type: "tool_call", task_id: this.state.task_id, phase: this.state.phase, id, name, args: preview };
     this.guard();
-    const result = await this.d.tools.invoke(name, args, { workspaceRoot: this.d.root });
+    const result = name === "delete_file" ? await this.deleteAuthorizedFile(args.path) :
+      await this.d.tools.invoke(name, args, { workspaceRoot: this.d.root });
     yield { type: "tool_result", task_id: this.state.task_id, phase: this.state.phase, id, name, result };
     return result;
+  }
+
+  private async deleteAuthorizedFile(target: unknown): Promise<ToolResult> {
+    try {
+      if (typeof target !== "string" || target !== this.d.deletePath) {
+        throw new Error("Deleting this file requires an explicit --delete-file path.");
+      }
+      let data;
+      const path = deletionPath(this.sandbox, target);
+      if (this.deletedPaths().has(path.rel) && !existsSync(path.abs)) {
+        data = { path: path.rel, mode: "delete", lines_added: 0, lines_removed: 0, warning: await this.refreshDeleted(path.rel) };
+      } else {
+        const hash = this.state.files_read[target];
+        if (typeof hash !== "string") throw new Error("Read the authorized file before deleting it.");
+        data = await this.deleteAndRefresh(this.state, target, hash);
+      }
+      return { ok: true, data, truncated: false, size_bytes: Buffer.byteLength(JSON.stringify(data)) };
+    } catch (e) {
+      const error = (e as Error).message;
+      return { ok: false, data: { error }, error, truncated: false, size_bytes: Buffer.byteLength(JSON.stringify({ error })) };
+    }
+  }
+
+  private async deleteAndRefresh(state: AgentState, target: string, hash?: string) {
+    const result = deleteWorkspaceFile(this.sandbox, this.d.stateStore, state, target, hash);
+    return { ...result, warning: await this.refreshDeleted(result.path) };
+  }
+
+  private async refreshDeleted(file: string): Promise<string | undefined> {
+    try { await this.d.indexService?.handleEvent({ type: "deleted", path: file }); }
+    catch { return `Deleted ${file} but failed to refresh the repository index. Run localcoder index to refresh it.`; }
+  }
+
+  async deleteFile(target: string) {
+    const state = newState(`Delete ${target}`, "file-operation");
+    state.phase = "DONE";
+    state.status = "done";
+    const { path: removed, warning } = await this.deleteAndRefresh(state, target);
+    return { path: removed, taskId: state.task_id, warning };
+  }
+
+  private editPrompt(): string {
+    return this.d.deletePath ? EDIT_SYS +
+      ` When the goal calls for removing the authorized file, use "op":"delete" with "path":${JSON.stringify(this.d.deletePath)}. No other deletion is authorized.` : EDIT_SYS;
   }
 
   private async *askModel<T>(role: ModelRole, system: string,
@@ -299,7 +346,7 @@ export class CodingAgent implements ICodingAgent {
     }
     const seen = new Set<string>();
     this.state.search_hits = hits.filter((h) => !seen.has(h.path) && seen.add(h.path)).slice(0, 12);
-    this.state.candidate_files = [...new Set([...this.state.candidate_files, ...this.state.search_hits.map((h) => h.path)])].slice(0, 6);
+    this.state.candidate_files = [...new Set([...(this.d.deletePath ? [this.d.deletePath] : []), ...this.state.candidate_files, ...this.state.search_hits.map((h) => h.path)])].slice(0, 6);
     yield* this.observe("search", true, `${this.state.search_hits.length} matching file(s): ${this.state.search_hits.map((h) => h.path).join(", ") || "none"}`);
     transition(this.state, "READ");
   }
@@ -324,7 +371,7 @@ export class CodingAgent implements ICodingAgent {
     const raw = Array.isArray(x.edits) ? x.edits : [];
     if (raw.length > 6) throw new Error("too many edits (max 6)");
     const edits: ProposedEdit[] = raw.map((e: any, i: number) => {
-      if (!e || !["replace", "patch", "write"].includes(e.op)) throw new Error(`edit ${i + 1}: "op" must be replace, patch or write`);
+      if (!e || !["replace", "patch", "write", ...(this.d.deletePath ? ["delete"] : [])].includes(e.op)) throw new Error(`edit ${i + 1}: unsupported operation`);
       if (typeof e.path !== "string" || !e.path) throw new Error(`edit ${i + 1}: "path" is required`);
       if (e.op === "replace" && (typeof e.old_text !== "string" || typeof e.new_text !== "string")) throw new Error(`edit ${i + 1}: replace needs old_text and new_text`);
       if (e.op === "patch" && typeof e.patch !== "string") throw new Error(`edit ${i + 1}: patch needs "patch"`);
@@ -349,7 +396,7 @@ export class CodingAgent implements ICodingAgent {
         { id: "project_context", text: bundle, priority: 30, shrinkable: true },
       ];
     };
-    const out = yield* this.askModel("coder", EDIT_SYS, sections, this.parseEdits, "edit proposal");
+    const out = yield* this.askModel("coder", this.editPrompt(), sections, this.parseEdits, "edit proposal");
     this.state.reasoning = out.reasoning;
     if (out.noChange) { this.state.proposed_edits = []; transition(this.state, "VERIFY"); return; }
     if (out.edits.length === 0) { this.fail("the model proposed no edits"); return; }
@@ -363,7 +410,10 @@ export class CodingAgent implements ICodingAgent {
     for (const e of this.state.proposed_edits) {
       if (e.status !== "pending") continue;
       let name: string, args: Record<string, unknown>;
-      if (e.op === "write") {
+      if (e.op === "delete") {
+        name = "delete_file";
+        args = { path: e.path };
+      } else if (e.op === "write") {
         name = "write_file";
         args = { path: e.path, content: e.content, allow_overwrite: this.state.failed_targeted_edit_paths.includes(e.path) };
       } else {
@@ -377,8 +427,12 @@ export class CodingAgent implements ICodingAgent {
         e.status = "applied";
         if (dd.warning) this.state.warnings.push(dd.warning);
         this.state.review = undefined;
-        this.state.edits.push({ path: dd.path, op: e.op, before_hash: dd.before_hash, after_hash: dd.after_hash, backup_ref: dd.backup_ref, step: this.state.tool_calls });
-        this.state.files_read[dd.path] = dd.after_hash;
+        if (e.op === "delete") {
+          delete this.state.files_read[dd.path];
+        } else {
+          this.state.edits.push({ path: dd.path, op: e.op, before_hash: dd.before_hash, after_hash: dd.after_hash, backup_ref: dd.backup_ref, step: this.state.tool_calls });
+          this.state.files_read[dd.path] = dd.after_hash;
+        }
         this.views.delete(dd.path);
         applied++;
         yield* this.observe(name, true, `edited ${dd.path} via ${dd.mode} (+${dd.lines_added} -${dd.lines_removed})`);
@@ -389,7 +443,7 @@ export class CodingAgent implements ICodingAgent {
       } else {
         e.status = "failed";
         e.error = res.error ?? "failed";
-        if (e.op !== "write" && !this.state.failed_targeted_edit_paths.includes(e.path)) this.state.failed_targeted_edit_paths.push(e.path);
+        if ((e.op === "patch" || e.op === "replace") && !this.state.failed_targeted_edit_paths.includes(e.path)) this.state.failed_targeted_edit_paths.push(e.path);
         yield* this.observe(name, false, `edit rejected for ${e.path}: ${e.error}`);
       }
     }
@@ -402,6 +456,17 @@ export class CodingAgent implements ICodingAgent {
   }
 
   private changedPaths(): string[] { return [...new Set(this.state.edits.map((x) => x.path))]; }
+  private deletedPaths(): Set<string> {
+    const lastEdits = new Map(this.state.edits.map((edit) => [edit.path, edit]));
+    return new Set(Array.from(lastEdits.values()).filter((edit) => edit.op === "delete").map((edit) => edit.path));
+  }
+
+  private checkDeletedFiles(): void {
+    for (const path of this.deletedPaths()) {
+      const target = deletionPath(this.sandbox, path);
+      if (existsSync(target.abs)) throw new Error(`Deleted file ${path} was recreated during the task.`);
+    }
+  }
 
   private async *doEdit(): AsyncGenerator<AgentEvent> {
     const applied = yield* this.applyProposed();
@@ -412,7 +477,8 @@ export class CodingAgent implements ICodingAgent {
 
   private async *formatChanged(): AsyncGenerator<AgentEvent> {
     if (!this.d.config.format_target) return;
-    for (const p of this.changedPaths().slice(0, 5)) {
+    const deleted = this.deletedPaths();
+    for (const p of this.changedPaths().filter((file) => !deleted.has(file)).slice(0, 5)) {
       const r = yield* this.callTool("run_formatter", { target: p });
       const edit = (r.data as any)?.edit;
       if (edit) {
@@ -427,9 +493,13 @@ export class CodingAgent implements ICodingAgent {
 
   private async targetedTests(changed: string[]): Promise<string[]> {
     const found: string[] = [];
+    const deleted = this.deletedPaths();
     const isTest = (p: string) => /\.(test|spec)\.[^/]+$/.test(p) || /(^|\/)test_[^/]+$/.test(p) || /_test\.[^/]+$/.test(p);
     for (const p of changed) {
-      if (isTest(p)) { found.push(p); continue; }
+      if (isTest(p)) {
+        if (!deleted.has(p)) found.push(p);
+        continue;
+      }
       const dir = path.posix.dirname(p), base = path.posix.basename(p), ext = path.posix.extname(base), stem = base.slice(0, base.length - ext.length);
       const at = (d: string, n: string) => (d === "." ? n : `${d}/${n}`);
       const cands = [at(dir, `${stem}.test${ext}`), at(dir, `${stem}.spec${ext}`), `test/${stem}.test${ext}`, `tests/${stem}.test${ext}`, at(dir, `test_${stem}${ext}`), at(dir, `${stem}_test${ext}`), `tests/test_${stem}${ext}`, `test/test_${stem}${ext}`];
@@ -444,7 +514,8 @@ export class CodingAgent implements ICodingAgent {
     const changed = this.changedPaths();
     let lintOk = false, targetedOk = false;
     this.state.validation = null;
-    for (const p of changed.slice(0, 5)) {
+    const deleted = this.deletedPaths();
+    for (const p of changed.filter((file) => !deleted.has(file)).slice(0, 5)) {
       const r = yield* this.callTool("run_linter", { target: p });
       const ran = (r.data as any)?.exit_code !== undefined;
       if (!ran) { skipped.push(`lint ${p}: ${r.error}`); continue; }
@@ -519,7 +590,7 @@ export class CodingAgent implements ICodingAgent {
       { id: "recent_observations", text: this.digest(), priority: 40, shrinkable: true },
       { id: "other_files_read", text: omitted, priority: 20, shrinkable: true },
     ];
-    const out = yield* this.askModel("coder", EDIT_SYS, async () => sections, this.parseEdits, "fix proposal");
+    const out = yield* this.askModel("coder", this.editPrompt(), async () => sections, this.parseEdits, "fix proposal");
     this.state.reasoning = out.reasoning || this.state.reasoning;
     this.state.proposed_edits = out.edits;
     const applied = out.edits.length ? yield* this.applyProposed() : 0;
@@ -529,11 +600,13 @@ export class CodingAgent implements ICodingAgent {
 
   private async *doVerify(): AsyncGenerator<AgentEvent> {
     const s = this.state;
+    this.checkDeletedFiles();
     const next = this.d.modelWorkflow ? "REVIEW" : "DONE";
     if (s.edits.length === 0 && !this.d.modelWorkflow) { s.summary = s.reasoning; s.verification = "none"; transition(s, next); return; }
     if (this.d.config.test) {
       const r = yield* this.callTool("run_tests", {});
       if (r.ok) {
+        this.checkDeletedFiles();
         s.verification = "full";
         yield* this.observe("run_tests", true, `full test run passed:\n${(r.data as any)?.summary ?? ""}`, (r.data as any)?.output_ref);
         transition(s, next);
@@ -579,7 +652,8 @@ export class CodingAgent implements ICodingAgent {
   private async *doReview(): AsyncGenerator<AgentEvent> {
     if (!this.d.modelWorkflow || !this.state.models) throw new Error("review requires the saved model workflow");
     const changed = this.changedPaths();
-    const paths = [...new Set([...changed, ...Object.keys(this.state.files_read)])];
+    const deleted = this.deletedPaths();
+    const paths = [...new Set([...changed, ...Object.keys(this.state.files_read)])].filter((file) => !deleted.has(file));
     const views = yield* this.loadFocus(paths);
     const result = yield* this.askModel("reviewer", REVIEW_SYS, async () => [
       { id: "goal", text: this.state.goal, priority: 100, required: true },
@@ -592,6 +666,7 @@ export class CodingAgent implements ICodingAgent {
     this.state.review = result;
     if (result.approved) {
       yield* this.observe("review", true, result.summary);
+      this.checkDeletedFiles();
       transition(this.state, "DONE");
       return;
     }
@@ -604,7 +679,18 @@ export class CodingAgent implements ICodingAgent {
 
   // ------------------------------------------------------------------ conclusion
   private finalDiff(files: string[]): string {
-    return files.map((p) => unifiedDiff(this.originalOf(p), this.readWhole(p), p)).filter(Boolean).join("\n");
+    const deleted = this.deletedPaths();
+    return files.map((p) => {
+      const original = this.originalOf(p);
+      if (!deleted.has(p)) return unifiedDiff(original, this.readWhole(p), p);
+      const target = this.sandbox.resolve(p, false);
+      if (!target.ok || existsSync(target.abs)) return unifiedDiff(original, this.readWhole(p), p);
+      const header = `--- a/${p}\n+++ /dev/null\n`;
+      if (original === "") return header;
+      const lines = original.replace(/\n$/, "").split("\n");
+      return header + `@@ -1,${lines.length} +0,0 @@\n` + lines.map((line) => `-${line}\n`).join("") +
+        (original.endsWith("\n") ? "" : "\\ No newline at end of file\n");
+    }).filter(Boolean).join("\n");
   }
 
   private async *conclude(): AsyncGenerator<AgentEvent> {
@@ -654,9 +740,10 @@ export class CodingAgent implements ICodingAgent {
       const c = this.sandbox.resolve(e.path, true);
       if (!c.ok) { res.conflicts.push({ path: e.path, reason: c.reason }); blocked.add(e.path); continue; }
       try {
+        if (e.op === "delete") deletionPath(this.sandbox, e.path);
         const cur = existsSync(c.abs) && statSync(c.abs).isFile() ? readFileSync(c.abs, "utf8") : null;
         const currentHash = cur === null ? null : hashText(cur);
-        const alreadyRestored = e.undo_status === "pending" && currentHash === e.before_hash;
+        const alreadyRestored = (e.undo_status === "pending" || e.op === "delete") && currentHash === e.before_hash;
         const alreadyDeleted = cur === null && e.before_hash === null;
         if (!opts.force && !alreadyRestored && !alreadyDeleted && currentHash !== e.after_hash) {
           res.conflicts.push({ path: e.path, reason: "file changed since the agent edited it; use force to override" });
@@ -670,7 +757,7 @@ export class CodingAgent implements ICodingAgent {
           if (!res.deleted.includes(e.path)) res.deleted.push(e.path);
           await this.d.indexService?.handleEvent({ type: "deleted", path: e.path });
         } else {
-          if (!alreadyRestored) writeAtomic(c.abs, loadBackup(this.d.root, e.backup_ref));
+          if (!alreadyRestored) writeAtomic(c.abs, loadBackup(this.d.root, e.backup_ref), e.before_mode);
           if (!res.restored.includes(e.path)) res.restored.push(e.path);
           await this.d.indexService?.handleEvent({ type: "modified", path: e.path });
         }

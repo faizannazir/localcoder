@@ -7,7 +7,7 @@ import { runSearch } from "./search";
 import { runSymbols } from "./symbols";
 import { runContext } from "./context-cmd";
 import { runMemory, runTask } from "./memory-cmd";
-import { runAgent, runUndo } from "./agent-cmd";
+import { runAgent, runFiles, runUndo } from "./agent-cmd";
 import { runVerify } from "./verify";
 import { runConfig } from "./config";
 import { runPrompt } from "./server-client";
@@ -61,6 +61,9 @@ async function main() {
     case "undo":
       await runUndo(rest);
       return;
+    case "files":
+      await runFiles(rest);
+      return;
     case "memory":
       await runMemory(rest);
       return;
@@ -89,7 +92,8 @@ async function main() {
           '  localcoder search "<query>"',
           '  localcoder symbols "<query>"',
           '  localcoder context "<query>" [--file <path>] [--symbol <name>] [--budget N] [--explain]',
-          '  localcoder agent "<task>" [--model <id>] [--session <id>] [--resume <task_id>] [--backend llama|mock]',
+          '  localcoder agent "<task>" [--model <id>] [--delete-file <path>] [--session <id>] [--resume <task_id>] [--backend llama|mock]',
+          "  localcoder files delete <path>",
           '  localcoder undo [task_id] [--force]',
           '  localcoder memory [status|list|add|refresh|delete]',
           '  localcoder task [new "<title>" "<summary>" [files...]|done]',
