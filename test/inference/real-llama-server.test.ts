@@ -229,7 +229,7 @@ test("REAL: the agent endpoint with a real (random-weight) model fails HONESTLY 
   } finally { await s.cleanup(); repo.cleanup(); }
 });
 
-test("REAL: `localcoder verify` against the real server + tiny model passes every plumbing step and honestly FAILS the model-quality steps (exit 1)", { skip }, async (t) => {
+test("REAL: `localcoder verify` against the real server + tiny model distinguishes completed generation from unusable random output (exit 1)", { skip }, async (t) => {
   const profile = await new HardwareProfiler().sample();
   const policy = new DefaultPolicyEngine().derive(profile);
   const routed = new DefaultModelRouter().route("hard_agent", policy, [entry]);
@@ -242,9 +242,20 @@ test("REAL: `localcoder verify` against the real server + tiny model passes ever
   const r = spawnSync(process.execPath, ["--import", pathToFileURL(require.resolve("tsx")).href, path.join(__dirname, "../../src/cli/index.ts"), "verify", "--llama-server", ENGINE!, "--model", MODEL, "--json-trials", "1", "--agent-seconds", "120", "--report", report], { cwd: dir, env, encoding: "utf8", timeout: 240_000 });
   const j = JSON.parse(readFileSync(report, "utf8"));
   const status = (n: string) => j.steps.find((s: any) => s.name === n)?.status;
-  for (const n of ["hardware", "llama-server", "model", "memory gate", "load model", "tokenizer", "chat generation", "fim /infill"]) assert.equal(status(n), "pass", `${n}: ${r.stdout}`);
-  assert.equal(status("agent JSON contract"), "fail", "random weights cannot follow the agent JSON contract — and verify says so");
-  assert.equal(status("agent task"), "fail");
+  for (const n of ["hardware", "llama-server", "model", "memory gate", "load model", "tokenizer"]) assert.equal(status(n), "pass", `${n}: ${r.stdout}`);
+  for (const name of ["chat generation", "fim /infill"]) {
+    const step = j.steps.find((item: any) => item.name === name);
+    assert.ok(step?.data?.finish_reason, `${name} must complete its transport protocol: ${r.stdout}`);
+    assert.equal(step.status, step.data.text.trim() ? "pass" : "fail", "empty model output is a quality failure even after a valid completion");
+    assert.ok(!step.detail.includes("tokens/s"), "text fragments must not be reported as generated-token throughput");
+  }
+  if (status("chat generation") === "pass") {
+    assert.equal(status("agent JSON contract"), "fail", "random weights cannot follow the agent JSON contract — and verify says so");
+    assert.equal(status("agent task"), "fail");
+  } else {
+    assert.equal(status("agent JSON contract"), undefined);
+    assert.equal(status("agent task"), "skip", "the agent is not attempted after unusable chat output");
+  }
   assert.equal(r.status, 1, "failed model-quality steps => exit code 1 (not 0, not the missing-component code 2)");
   assert.equal(j.missing.length, 0);
 });

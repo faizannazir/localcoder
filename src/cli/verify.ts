@@ -112,27 +112,29 @@ export async function runVerify(args: string[]): Promise<void> {
     const gen = async (prompt: PromptPayload, maxTokens: number) => {
       const start = Date.now();
       let first = 0, chunks = 0, text = "";
+      let finishReason: string | undefined;
       for await (const t of backend.generate(prompt, { max_tokens: maxTokens, temperature: 0.2 })) {
+        finishReason = t.finish_reason ?? finishReason;
         if (!first && t.token) first = Date.now();
         if (t.token) { chunks++; text += t.token; }
       }
       const end = Date.now();
-      return { text, chunks, ttft_ms: first ? first - start : null, chunks_per_s: first && end > first ? Math.round((chunks / ((end - first) / 1000)) * 10) / 10 : null, total_ms: end - start };
+      return { text, chunks, finish_reason: finishReason, ttft_ms: first ? first - start : null, chunks_per_s: first && end > first ? Math.round((chunks / ((end - first) / 1000)) * 10) / 10 : null, total_ms: end - start };
     };
 
     // 7. chat
     let chatOk = false;
     try {
       const r = await gen({ mode: "chat", messages: [{ role: "system", content: "You are terse." }, { role: "user", content: "Reply with exactly one word: pong" }] }, 16);
-      chatOk = r.text.trim().length > 0;
-      add("chat generation", chatOk ? "pass" : "fail", `${JSON.stringify(r.text.trim().slice(0, 60))}; first token ${r.ttft_ms ?? "n/a"}ms, ~${r.chunks_per_s ?? "n/a"} chunks/s (≈ tokens/s), ${r.total_ms}ms total`, r as any);
+      chatOk = !!r.finish_reason && r.text.trim().length > 0;
+      add("chat generation", chatOk ? "pass" : "fail", `${JSON.stringify(r.text.trim().slice(0, 60))}; first token ${r.ttft_ms ?? "n/a"}ms, ~${r.chunks_per_s ?? "n/a"} text chunks/s, ${r.total_ms}ms total`, r as any);
     } catch (err) { add("chat generation", "fail", (err as Error).message); }
 
     // 8. fill-in-middle
     if (entry.capabilities.includes("fim")) {
       try {
         const r = await gen({ mode: "fim", prefix: "def add(a, b):\n    return ", suffix: "\n\nprint(add(1, 2))\n" }, 24);
-        add("fim /infill", r.text.trim() ? "pass" : "fail", `${JSON.stringify(r.text.slice(0, 60))}; first token ${r.ttft_ms ?? "n/a"}ms`);
+        add("fim /infill", r.finish_reason && r.text.trim() ? "pass" : "fail", `${JSON.stringify(r.text.slice(0, 60))}; first token ${r.ttft_ms ?? "n/a"}ms`, r as any);
       } catch (err) { add("fim /infill", "fail", (err as Error).message); }
     } else add("fim /infill", "skip", "this model's GGUF has no fill-in-middle tokens (autocomplete needs a FIM-capable model)");
 
