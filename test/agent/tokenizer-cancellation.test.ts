@@ -11,7 +11,7 @@ import { SequentialModelWorkflow } from "../../src/agent/model-workflow";
 import { FAKE_PROFILE } from "./helpers";
 import type { ModelRegistryEntry } from "../../src/types/index";
 
-for (const stage of ["tokenizer", "startup"] as const) test(`aborting stalled role ${stage} releases the exclusive model queue`, { skip: process.platform === "win32" ? "POSIX executable fixture" : false, timeout: 10000 }, async () => {
+for (const [stage, startupDelay] of [["tokenizer", 0], ["tokenizer", 2500], ["startup", 0]] as const) test(`aborting stalled role ${stage} releases the exclusive model queue${startupDelay ? " after slow startup" : ""}`, { skip: process.platform === "win32" ? "POSIX executable fixture" : false, timeout: 10000 }, async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "lc-tokenize-cancel-"));
   const binary = path.join(root, "server");
   const model = path.join(root, "model.gguf"); writeFileSync(model, "fixture");
@@ -25,21 +25,32 @@ const server = http.createServer((req, res) => {
  if (req.url === '/tokenize') { process.stdout.write('TOKENIZE_STARTED\\n'); return; }
  res.end('{}');
 });
-server.listen(0,'127.0.0.1',()=>process.stderr.write('listening on http://127.0.0.1:'+server.address().port+'\\n'));
+setTimeout(()=>server.listen(0,'127.0.0.1',()=>process.stderr.write('listening on http://127.0.0.1:'+server.address().port+'\\n')), ${startupDelay});
 `, { mode: 0o755 });
   const entry: ModelRegistryEntry = { model_id: "fixture", file_path: model, architecture: "dense", parameter_count: { total: 0.1 }, quantization: "F32", context_limit: 4096, backend_requirements: ["cpu"], estimated_memory_gb: 0.1, capabilities: [] };
   const backends: LlamaCppBackend[] = [];
   const manager = new DefaultModelManager([entry], () => { const b = new LlamaCppBackend({ binary }); backends.push(b); if (stage === "startup") setTimeout(() => controller.abort(), 50); return b; });
   const controller = new AbortController();
+  let startupExpired = false;
+  const startupWatchdog = setTimeout(() => { startupExpired = true; controller.abort(); }, 8000);
   const workflow = new SequentialModelWorkflow({ registry: [entry], modelManager: manager, router: new DefaultModelRouter(), policyEngine: new DefaultPolicyEngine(), profiler: { sample: async () => FAKE_PROFILE, onChange: () => () => {} } }, { planner: "fixture", coder: "fixture", reviewer: "fixture" });
+  const cancellationStarted = new Promise<void>((resolve) => controller.signal.addEventListener("abort", () => resolve(), { once: true }));
+  let reachedTokenizer = false;
   let pending: Promise<unknown> | undefined;
   try {
     pending = workflow.withRole("planner", async ({ tokenCounter }) => {
+      reachedTokenizer = true;
       const count = tokenCounter.count("hello");
       setTimeout(() => controller.abort(), 30);
       return count;
     }, controller.signal);
     const outcome = pending.then(() => "completed", () => "aborted");
+    // Startup has its own test timeout; the cleanup budget starts at cancellation.
+    await Promise.race([cancellationStarted, outcome]);
+    clearTimeout(startupWatchdog);
+    assert.equal(startupExpired, false, "fixture startup exceeded its separate eight-second budget");
+    assert.equal(controller.signal.aborted, true, "an unrelated startup error cannot count as successful cancellation");
+    if (stage === "tokenizer") assert.equal(reachedTokenizer, true);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const result = await Promise.race([outcome, new Promise<string>((resolve) => { timer = setTimeout(() => resolve("stalled"), 2000); })]);
     clearTimeout(timer);
@@ -48,6 +59,7 @@ server.listen(0,'127.0.0.1',()=>process.stderr.write('listening on http://127.0.
     assert.equal(manager.resident().length, 0);
     assert.ok(backends.every((b) => b.pid === undefined));
   } finally {
+    clearTimeout(startupWatchdog);
     controller.abort();
     for (const backend of backends) await backend.unload();
     await pending?.catch(() => {});
