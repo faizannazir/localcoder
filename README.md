@@ -189,3 +189,7 @@ docs/          Setup, usage, models, and verification records
 ```
 
 Licensed under Apache-2.0. [License](LICENSE)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and contribution ideas. Report security issues privately as described in [SECURITY.md](SECURITY.md).
