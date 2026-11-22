@@ -1,6 +1,6 @@
 # Models and the inference engine
 
-localcoder does not download anything itself. You provide two real components:
+LocalCoder uses llama-server and one or more GGUF model files. The Apple Silicon setup downloads both. The terminal can download supported models on any platform.
 
 For exact Windows, Linux, and macOS download choices, extraction steps, and destination folders, follow [SETUP-WINDOWS-LINUX-MAC.md](SETUP-WINDOWS-LINUX-MAC.md).
 
@@ -63,3 +63,15 @@ localcoder verify --llama-server /path/to/llama-b1234/llama-server --model ~/mod
 ```
 
 Runs against the real server and real model: hardware + policy → binary check → GGUF read → memory gate → load (measures RSS) → real tokenizer → chat → fill-in-middle → "can this model follow the agent's JSON contract?" → the agent fixing a bug in a tiny real repo, confirmed by re-running that repo's tests independently. It writes `verify-report.json`. Exit code 0 = all passed, 1 = something failed, 2 = a required component is missing (it tells you which, with the download name). Nothing in it is mocked.
+
+## Terminal model management
+
+Run `localcoder models list --downloaded` to see models available on this computer. Run `localcoder models list` for the catalog and download status.
+
+```bash
+localcoder models download qwen2.5-coder-0.5b-q4
+localcoder models download qwen2.5-coder-1.5b-q4
+localcoder models add /absolute/path/to/custom.gguf
+```
+
+The download command saves pinned Qwen releases to `~/.localcoder/models` (or `$LOCALCODER_HOME/models`) and verifies the byte count and SHA-256 before making them available. For other GGUF files, download the weights separately and register them with `models add`. The `models remove` command removes a custom registration and leaves its file on disk.

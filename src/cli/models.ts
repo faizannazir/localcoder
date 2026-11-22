@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import path from "path";
 import { loadFullRegistry, isDownloaded } from "../router/registry";
-import { userDataDir } from "../util/paths";
+import { userDataDir, userModelsDir } from "../util/paths";
+import { downloadModel, modelDownloads } from "../router/model-download";
 import { entryFromGguf, readGgufMeta, summarizeGguf } from "../inference/gguf";
 import type { ModelRegistryEntry } from "../types/index";
 
@@ -15,10 +16,7 @@ export function registerLocalEntry(registryDir: string, entry: ModelRegistryEntr
 /** Registers a real GGUF file: reads its header and writes/updates registry/models.local.json. Returns the entry. */
 export function addLocalModel(registryDir: string, ggufPath: string): ModelRegistryEntry {
   const entry = entryFromGguf(ggufPath, readGgufMeta(ggufPath));
-  const file = path.join(registryDir, "models.local.json");
-  mkdirSync(registryDir, { recursive: true });
-  const current: ModelRegistryEntry[] = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
-  writeFileSync(file, JSON.stringify([...current.filter((e) => e.model_id !== entry.model_id), entry], null, 2) + "\n");
+  registerLocalEntry(registryDir, entry);
   return entry;
 }
 
@@ -52,13 +50,37 @@ export async function runModels(args: string[] = []): Promise<void> {
   }
 
   const registry = loadFullRegistry();
-  const rows = registry.map((e) => ({
+  if (args[0] === "download") {
+    const id = args[1];
+    const source = modelDownloads.get(id);
+    const model = registry.find((entry) => entry.model_id === id);
+    if (args.length !== 2 || !source || !model) {
+      throw new Error(`Usage: localcoder models download <id>. Available downloads: ${[...modelDownloads.keys()].join(", ")}.`);
+    }
+    if (isDownloaded(model)) {
+      console.log(`${id} is already downloaded at ${model.file_path}`);
+      return;
+    }
+    if (path.isAbsolute(model.file_path)) {
+      throw new Error(`The registered file for ${id} is missing. Remove that registration before downloading.`);
+    }
+    const destination = path.join(userModelsDir(), path.basename(model.file_path));
+    console.log(`Downloading ${id} (${(source.bytes / 1e6).toFixed(0)} MB)…`);
+    await downloadModel(source, destination);
+    console.log(`Downloaded ${id} to ${destination} (SHA-256 verified).`);
+    return;
+  }
+  const downloadedOnly = args.length === 2 && args[0] === "list" && args[1] === "--downloaded";
+  if (!downloadedOnly && args.length !== 0 && !(args.length === 1 && args[0] === "list")) {
+    throw new Error("Usage: localcoder models list [--downloaded] | download <id> | add <file.gguf> | remove <id>");
+  }
+  const rows = registry.filter((entry) => !downloadedOnly || isDownloaded(entry)).map((e) => ({
     model_id: e.model_id,
     params: `${e.parameter_count.total}B${e.parameter_count.active ? ` (${e.parameter_count.active}B active)` : ""}`,
     quant: e.quantization,
     ctx: e.context_limit.toLocaleString(),
     est_gb: e.estimated_memory_gb.toFixed(1),
-    downloaded: isDownloaded(e) ? "yes" : "no — run `localcoder models add <file.gguf>`",
+    downloaded: isDownloaded(e) ? "yes" : modelDownloads.has(e.model_id) ? "no — download available" : "no — import a GGUF",
   }));
   const w = (k: keyof (typeof rows)[0], min: number) => Math.max(min, ...rows.map((r) => r[k].length));
   const widths = { model_id: w("model_id", 8), params: w("params", 6), quant: w("quant", 5), ctx: w("ctx", 3), est_gb: w("est_gb", 6) };
