@@ -7,7 +7,7 @@ import { buildContext, createServer } from "../../src/server/index";
 import type { AddressInfo } from "net";
 import { FAKE_PROFILE } from "../agent/helpers";
 
-function makeTempProjectWithTinyModel(): string {
+function makeTempProjectWithTinyModel(extraModel = false): string {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "localcoder-test-"));
   mkdirSync(path.join(tmp, "registry"), { recursive: true });
   writeFileSync(
@@ -24,13 +24,16 @@ function makeTempProjectWithTinyModel(): string {
         estimated_memory_gb: 0.1,
         capabilities: ["fim", "tool_calling"],
       },
+      ...(extraModel ? [{ model_id: "explicit-test-model", architecture: "dense",
+        parameter_count: { total: 1.5 }, quantization: "Q4_K_M", file_path: "explicit.gguf",
+        context_limit: 4096, backend_requirements: ["cpu"], estimated_memory_gb: 0.2, capabilities: [] }] : []),
     ])
   );
   return tmp;
 }
 
-async function startTestServer() {
-  const tmp = makeTempProjectWithTinyModel();
+async function startTestServer(extraModel = false) {
+  const tmp = makeTempProjectWithTinyModel(extraModel);
   const ctx = buildContext({ baseDir: tmp, backend: "mock" });
   ctx.profiler = { sample: async () => ({ ...FAKE_PROFILE }), onChange: () => () => {} };
   const server = createServer(ctx);
@@ -50,9 +53,11 @@ test("GET /v1/models responds with the registry within budget", async () => {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/v1/models`);
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { data: { model_id: string }[] };
+    const body = (await res.json()) as { data: { model_id: string; id: string; object: string }[] };
     assert.equal(body.data.length, 1);
     assert.equal(body.data[0].model_id, "tiny-test-model");
+    assert.equal(body.data[0].id, "tiny-test-model");
+    assert.equal(body.data[0].object, "model");
   } finally {
     await cleanup();
   }
@@ -101,4 +106,33 @@ test("completions route file imports nothing from context/index-store/agent/tool
   for (const forbidden of ["context/", "index-store/", "agent/", "tools/", "classifier"]) {
     assert.ok(!src.includes(`"../../${forbidden}`) && !src.includes(`'../../${forbidden}`), `completions.ts must not import from ${forbidden} — see implementation-spec.md §2.8`);
   }
+});
+
+
+test("IDE chat clients can select an exact model and request JSON or streaming replies", async () => {
+  const { port, cleanup } = await startTestServer(true);
+  const post = (body: unknown) => fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  try {
+    const messages = [{ role: "developer", content: [{ type: "text", text: "Answer briefly." }] },
+      { role: "user", content: [{ type: "text", text: "Review this function." }] }];
+    const res = await post({ model: "explicit-test-model", messages, stream: false, max_completion_tokens: 5 });
+    assert.equal(res.status, 200);
+    const completion = await res.json() as any;
+    assert.equal(completion.object, "chat.completion");
+    assert.equal(completion.model, "explicit-test-model");
+    assert.equal(completion.choices[0].message.role, "assistant");
+    assert.match(completion.choices[0].message.content, /mock:explicit-test-model/);
+    assert.ok(completion.choices[0].finish_reason);
+
+    const stream = await post({ model: "localcoder-auto", messages, stream: true });
+    const chunks = (await stream.text()).split("\n").filter((line) => line.startsWith("data: {"))
+      .map((line) => JSON.parse(line.slice(6)));
+    assert.equal(chunks[0].choices[0].delta.role, "assistant");
+    assert.equal(chunks[0].model, "tiny-test-model");
+
+    assert.equal((await post({ model: "missing", messages })).status, 404);
+    assert.equal((await post({ model: "explicit-test-model", messages, tools: [{ type: "function" }] })).status, 400);
+  } finally { await cleanup(); }
 });

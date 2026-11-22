@@ -7,6 +7,10 @@ export async function handleModels(_body: unknown, res: ServerResponse, ctx: App
 
   const models = ctx.registry.map((entry) => ({
     ...entry,
+    id: entry.model_id,
+    object: "model",
+    created: 0,
+    owned_by: "local",
     resident: residentIds.has(entry.model_id),
     downloaded: isDownloaded(entry, ctx.baseDir),
   }));

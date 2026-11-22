@@ -90,16 +90,16 @@ For a chat client, start the server from the target project:
 node "$LOCALCODER_CLI" serve --port 8080
 ```
 
-A Continue chat configuration can follow its [official OpenAI-provider configuration](https://docs.continue.dev/customize/model-providers/top-level/openai):
+Use a model ID returned as `id` by `GET /v1/models`. This example selects the 1.5B model installed by the Apple Silicon setup. A Continue chat configuration can follow its [official OpenAI-provider configuration](https://docs.continue.dev/customize/model-providers/top-level/openai):
 
 ```yaml
 name: LocalCoder chat
 version: 1.0.0
 schema: v1
 models:
-  - name: LocalCoder automatic routing
+  - name: LocalCoder Qwen Coder 1.5B
     provider: openai
-    model: localcoder-auto
+    model: qwen2.5-coder-1.5b-q4
     apiBase: http://127.0.0.1:8080/v1
     apiKey: local
     roles: [chat]
@@ -111,10 +111,12 @@ models:
 
 This is a configuration example, not an end-to-end tested extension integration. Use Chat mode. If server authentication is enabled, replace the dummy client key with your `LOCALCODER_API_TOKEN`; keep real keys out of shared configuration.
 
-The compatibility boundaries matter:
+For VS Code with Copilot Chat, open **Chat: Manage Language Models**, choose **Add Models → Custom Endpoint**, and select **Chat Completions**. Use the full URL `http://127.0.0.1:8080/v1/chat/completions` and the same model ID. Set `toolCalling` and `vision` to `false`; use **Ask** for text chat. Start with `maxInputTokens: 3000` and `maxOutputTokens: 512` so the request leaves room under tighter memory policies. See the [VS Code custom endpoint instructions](https://code.visualstudio.com/docs/agent-customization/language-models#_add-a-custom-endpoint-model).
 
-- Chat supports streaming string messages with system/user/assistant roles. It does not implement native tool-call messages, image content, `/v1/responses`, or non-streaming chat responses.
-- The chat API currently routes automatically and does not honor the client's `model` value as a pin. `localcoder-auto` describes that behavior; configure explicit agent roles for controlled workflow assignments.
+The API supports these chat clients' request formats. The desktop extension flows require their own verification:
+
+- Chat supports streaming and explicit `stream: false`, with strings or text parts and system/developer/user/assistant roles. It accepts `max_tokens` and `max_completion_tokens`. Native tool calls, images, and `/v1/responses` are outside this chat API.
+- Chat honors an installed `model` ID and reports unknown IDs with HTTP 404. Use `localcoder-auto` or omit `model` for automatic routing. Every selection still uses the live memory gate.
 - `/v1/completions` takes `prefix` and optional `suffix`, rather than a standard OpenAI `prompt` body. An autocomplete client needs the appropriate adapter.
 - Chat requests do not invoke LocalCoder's plan/code/review loop. An IDE agent integration must call `/v1/agent/run` and handle its events, diffs, validation, resume, and undo.
 
