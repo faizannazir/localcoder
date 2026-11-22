@@ -1,5 +1,27 @@
 # Verification
 
+## Trained models verified on 2026-11-22
+
+The production build and typecheck passed. The complete suite passed **182/182 tests with zero failures or skips** on this 16 GB ARM64 Mac. A flaky cancellation test was reproduced with a deliberately slow child startup and corrected to measure its two-second cleanup allowance from cancellation, with a separate bounded startup watchdog.
+
+Official Qwen 0.5B and 1.5B trained GGUF weights were downloaded at pinned revisions and checked against the publisher's SHA-256 hashes. The native engine was llama.cpp `b12241`. Live hardware profiles and memory gates remained enabled. These are trained weights, separate from the random-weight process fixtures used in earlier records.
+
+Real testing exposed a prompt problem: models copied the literal example path `file` even when they correctly identified the code defect. In paired 1.5B edit probes, the original prompt used the wrong path in 2/2 trials; descriptive field instructions produced the correct path and fix in 2/2. The role prompts now describe fields without prefilled answer examples. This is an observed fix on the tested tasks, not a guarantee of model obedience.
+
+| Workflow | Models | Independent tests | Result | Elapsed | Maximum observed process RSS |
+| --- | --- | --- | --- | ---: | ---: |
+| CLI addition fix | 1.5B for all roles | Failed before, passed after | Approved | 14.3 s | 1706.8 MB |
+| CLI clamp boundaries | 1.5B for all roles | Failed before, passed after | Approved | 34.1 s | 1707.5 MB |
+| HTTP/SSE addition fix | 1.5B for all roles | Failed before, passed after | Approved | 38.0 s | 1708.3 MB |
+| CLI mixed planner | 0.5B planner, 1.5B coder/reviewer | Still failed | Stopped after bounded repair | 23.4 s | 1707.5 MB |
+| CLI mixed coder | 1.5B planner/reviewer, 0.5B coder | Still failed | Resumable invalid-JSON error | 8.8 s | 1653.6 MB |
+
+Each run observed at most one model process at a time and zero remaining observed child processes. The successful runs used the same trained model in all three roles, with separate loads. Distinct-model switching was exercised in the failed runs; those results do not establish reliable mixed-model task completion. RSS was sampled every 200 ms and is neither a guaranteed peak nor a complete GPU-memory measurement.
+
+The normal `verify` command also passed every step with the 1.5B model after the fix, including a separate independently retested coding task. Verification reports now record terminal generation evidence and label text fragments as text chunks rather than generated-token throughput. Empty random-weight output remains a quality failure even when transport completes.
+
+See [machine-readable trained-model results](trained-model-validation.json) for pinned artifacts, cases, cleanup observations, failures, and limitations. These small fixtures are not a repository-scale quality benchmark, an IDE-extension compatibility test, or proof of superiority over another product. Model binaries remain in ignored local `models/` and `engine/` directories and are not committed to Git.
+
 ## Sequential workflow verified on 2026-11-18
 
 Typecheck and production build passed on macOS ARM64, Node.js 25.9.0, using the official llama.cpp `b12241` binary. The complete updated suite ran 181 tests: 179 passed, none failed or were canceled, and two skipped because the live safe-memory budget could not fit the fixture. Dependencies were already installed; this continuation did not repeat clean-install or Node 22 verification.

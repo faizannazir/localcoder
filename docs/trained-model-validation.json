@@ -1,0 +1,156 @@
+{
+  "verified_on": "2026-11-22",
+  "source_commit": "fa9f863",
+  "environment": {
+    "platform": "macOS ARM64",
+    "ram_gb": 16,
+    "node": "25.9.0",
+    "engine": "llama.cpp b12241 cf6463ace",
+    "hardware_policy": "actual host profiler and resource gates; no fake profile or memory override",
+    "sampling_interval_ms": 200
+  },
+  "models": [
+    {
+      "name": "Qwen2.5-Coder-0.5B-Instruct-Q4_K_M",
+      "publisher": "Qwen",
+      "repository": "https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF",
+      "revision": "ebb2015119c907b064c512bf053e945850b5875f",
+      "file_bytes": 491400064,
+      "verified_sha256": "1d9614638d18024d0fbb36575a15f1302a3adf044df10345688ec4f6e1c4ff32"
+    },
+    {
+      "name": "Qwen2.5-Coder-1.5B-Instruct-Q4_K_M",
+      "publisher": "Qwen",
+      "repository": "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+      "revision": "f86cb2c1fa58255f8052cc32aeede1b7482d4361",
+      "file_bytes": 1117320768,
+      "verified_sha256": "cc324af070c2ecbfd324a30884d2f951a7ff756aba85cb811a6ec436933bb046"
+    }
+  ],
+  "paired_edit_prompt_probe": {
+    "model": "Qwen 1.5B Q4_K_M",
+    "old_prompt_correct_path_trials": 0,
+    "new_prompt_correct_path_trials": 2,
+    "trials_per_variant": 2,
+    "observation": "Old replies diagnosed addition correctly but used the literal example path file; descriptive field instructions used calc.js."
+  },
+  "scenarios": [
+    {
+      "case": "workflow-1.5b-add",
+      "interface": "CLI",
+      "models": {
+        "planner": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+        "coder": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+        "reviewer": "qwen2.5-coder-1.5b-instruct-q4-k-m"
+      },
+      "goal": "Fix the add function in calc.js so all tests pass. Keep the public export unchanged.",
+      "success": true,
+      "independent_before_exit": 1,
+      "independent_after_exit": 0,
+      "elapsed_ms": 14338,
+      "peak_observed_model_processes": 1,
+      "max_observed_rss_mb": 1706.8,
+      "observed_process_count": 3,
+      "remaining_process_count": 0,
+      "stop_reason": null,
+      "final_source": "function add(a, b) { return a + b; }\nmodule.exports = { add };\n"
+    },
+    {
+      "case": "workflow-1.5b-clamp",
+      "interface": "CLI",
+      "models": {
+        "planner": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+        "coder": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+        "reviewer": "qwen2.5-coder-1.5b-instruct-q4-k-m"
+      },
+      "goal": "Fix clamp in calc.js: values below min return min, values above max return max, values inside stay unchanged. All tests must pass.",
+      "success": true,
+      "independent_before_exit": 1,
+      "independent_after_exit": 0,
+      "elapsed_ms": 34115,
+      "peak_observed_model_processes": 1,
+      "max_observed_rss_mb": 1707.5,
+      "observed_process_count": 3,
+      "remaining_process_count": 0,
+      "stop_reason": null,
+      "final_source": "function clamp(value, min, max) { if (value < min) return min; else if (value > max) return max; else return value; }\nmodule.exports = { clamp };\n"
+    },
+    {
+      "case": "workflow-api-1.5b-add",
+      "interface": "HTTP/SSE",
+      "models": {
+        "planner": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+        "coder": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+        "reviewer": "qwen2.5-coder-1.5b-instruct-q4-k-m"
+      },
+      "goal": "Fix the add function in calc.js so that the tests pass",
+      "success": true,
+      "independent_before_exit": 1,
+      "independent_after_exit": 0,
+      "elapsed_ms": 37983,
+      "peak_observed_model_processes": 1,
+      "max_observed_rss_mb": 1708.3,
+      "observed_process_count": 3,
+      "remaining_process_count": 0,
+      "stop_reason": null,
+      "final_source": "function add(a, b) {\n  return a + b;\n}\nmodule.exports = { add };\n"
+    },
+    {
+      "case": "workflow-mixed-add",
+      "interface": "CLI",
+      "models": {
+        "planner": "qwen2.5-coder-0.5b-instruct-q4-k-m",
+        "coder": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+        "reviewer": "qwen2.5-coder-1.5b-instruct-q4-k-m"
+      },
+      "goal": "Fix the add function in calc.js so all tests pass. Keep the public export unchanged.",
+      "success": false,
+      "independent_before_exit": 1,
+      "independent_after_exit": 1,
+      "elapsed_ms": 23409,
+      "peak_observed_model_processes": 1,
+      "max_observed_rss_mb": 1707.5,
+      "observed_process_count": 5,
+      "remaining_process_count": 0,
+      "stop_reason": "fix attempts exhausted (3)",
+      "final_source": "function add(a, b) { return a - b; }\nmodule.exports = { add };\n"
+    },
+    {
+      "case": "workflow-mixed-code-add",
+      "interface": "CLI",
+      "models": {
+        "planner": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+        "coder": "qwen2.5-coder-0.5b-instruct-q4-k-m",
+        "reviewer": "qwen2.5-coder-1.5b-instruct-q4-k-m"
+      },
+      "goal": "Fix the add function in calc.js so all tests pass. Keep the public export unchanged.",
+      "success": false,
+      "independent_before_exit": 1,
+      "independent_after_exit": 1,
+      "elapsed_ms": 8843,
+      "peak_observed_model_processes": 1,
+      "max_observed_rss_mb": 1653.6,
+      "observed_process_count": 2,
+      "remaining_process_count": 0,
+      "stop_reason": "model did not return valid JSON for edit proposal",
+      "final_source": "function add(a, b) { return a - b; }\nmodule.exports = { add };\n"
+    }
+  ],
+  "verification_cli_after_fix": {
+    "model": "Qwen 1.5B Q4_K_M",
+    "all_steps_passed": true
+  },
+  "automated_suite": {
+    "tests": 182,
+    "passed": 182,
+    "failed": 0,
+    "skipped": 0
+  },
+  "limits": [
+    "Hand-selected small arithmetic fixtures, not a general coding benchmark or a competitor comparison.",
+    "Sampled process RSS is not a guaranteed peak or complete GPU/unified-memory measurement.",
+    "Successful three-role runs reused the 1.5B weights; two distinct-model assignments involving 0.5B failed.",
+    "Windows and Linux were not exercised in this run.",
+    "IDE extensions were not exercised end to end."
+  ]
+}

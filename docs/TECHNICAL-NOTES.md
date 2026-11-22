@@ -206,3 +206,9 @@ A successful health response does not establish ownership of a spawned server. P
 Random byte-token fixtures can consume their requested generation budget while emitting zero visible text. Streaming fragments are not generated-token counts; protocol tests verify completion events and the engine's usage fields instead. Trained-model quality requires a separate trained-model evaluation.
 
 After a successful file mutation, an index refresh error must not turn the result into an unjournaled failed edit. File and formatter operations preserve backup/hash metadata and return a bounded, redacted warning when indexing fails; the agent can still journal and undo the actual write. Regression tests cover both operations and restore the original file.
+
+## Small-model prompt evaluation
+
+A syntactically valid JSON response does not establish a usable coding result. Native Qwen trials copied the example path `file` while correctly diagnosing a subtraction bug. Descriptive field contracts removed that example-value failure in paired 1.5B probes and real CLI/API tasks. Keep semantic model runs alongside deterministic orchestration tests when changing prompts; do not substitute tests that only check prompt wording.
+
+Generation can terminate normally without visible text. Verification records terminal events separately from usable output, and measures text chunks without presenting them as generated tokens.
