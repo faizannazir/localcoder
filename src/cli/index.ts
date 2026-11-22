@@ -9,6 +9,7 @@ import { runContext } from "./context-cmd";
 import { runMemory, runTask } from "./memory-cmd";
 import { runAgent, runUndo } from "./agent-cmd";
 import { runVerify } from "./verify";
+import { runConfig } from "./config";
 
 async function main() {
   const [, , command, ...rest] = process.argv;
@@ -22,6 +23,9 @@ async function main() {
       return;
     case "models":
       await runModels(rest);
+      return;
+    case "config":
+      runConfig(rest);
       return;
     case "index":
       await runIndex(rest);
@@ -62,6 +66,7 @@ async function main() {
           "  localcoder models list [--downloaded]",
           "  localcoder models download <id>",
           "  localcoder models add <file.gguf> | remove <id>",
+          "  localcoder config [list|path|get|set|unset]",
           "  localcoder index [path] [--status] [--clear] [--watch]",
           '  localcoder search "<query>"',
           '  localcoder symbols "<query>"',

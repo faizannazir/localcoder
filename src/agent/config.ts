@@ -33,7 +33,42 @@ export interface AgentConfig {
   max_result_bytes?: number;
 }
 
-const ARGV_KEYS: (keyof AgentConfig)[] = ["test", "test_target", "lint", "lint_target", "format_target", "build"];
+const ARGV_KEYS = ["test", "test_target", "lint", "lint_target", "format_target", "build"] as const;
+const LIMIT_KEYS = ["timeout_ms", "max_result_bytes"] as const;
+export const AGENT_CONFIG_KEYS = ["models", ...ARGV_KEYS, ...LIMIT_KEYS] as const;
+export const agentConfigPath = (root: string) => path.join(root, ".localcoder", "agent.json");
+
+export function readAgentConfigOverrides(root: string): Record<string, unknown> {
+  const file = agentConfigPath(root);
+  if (!existsSync(file)) return {};
+  const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(".localcoder/agent.json must contain a JSON object");
+  }
+  return raw as Record<string, unknown>;
+}
+
+export function parseAgentConfig(raw: Record<string, unknown>): AgentConfig {
+  const config: AgentConfig = {};
+  if (raw.models !== undefined) config.models = parseAgentModels(raw.models);
+  for (const key of ARGV_KEYS) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || value.length === 0 || !value.every((item) => typeof item === "string")) {
+      throw new Error(`.localcoder/agent.json: "${key}" must be a non-empty array of strings`);
+    }
+    config[key] = value;
+  }
+  for (const key of LIMIT_KEYS) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 2_147_483_647) {
+      throw new Error(`.localcoder/agent.json: "${key}" must be an integer from 1 to 2147483647`);
+    }
+    config[key] = value;
+  }
+  return config;
+}
 
 export function loadAgentConfig(root: string): AgentConfig {
   const cfg: AgentConfig = {};
@@ -46,18 +81,5 @@ export function loadAgentConfig(root: string): AgentConfig {
       if (typeof scripts.build === "string") cfg.build = ["npm", "run", "build", "--silent"];
     } catch { /* unreadable package.json: no auto-detected commands */ }
   }
-  const explicit = path.join(root, ".localcoder", "agent.json");
-  if (existsSync(explicit)) {
-    const raw = JSON.parse(readFileSync(explicit, "utf8"));
-    if (raw.models !== undefined) cfg.models = parseAgentModels(raw.models);
-    for (const k of ARGV_KEYS) {
-      const v = raw[k];
-      if (v === undefined) continue;
-      if (!Array.isArray(v) || v.length === 0 || !v.every((x) => typeof x === "string")) throw new Error(`.localcoder/agent.json: "${k}" must be a non-empty array of strings`);
-      (cfg as any)[k] = v;
-    }
-    if (typeof raw.timeout_ms === "number") cfg.timeout_ms = raw.timeout_ms;
-    if (typeof raw.max_result_bytes === "number") cfg.max_result_bytes = raw.max_result_bytes;
-  }
-  return cfg;
+  return { ...cfg, ...parseAgentConfig(readAgentConfigOverrides(root)) };
 }

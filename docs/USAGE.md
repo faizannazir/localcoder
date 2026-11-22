@@ -7,7 +7,10 @@ localcoder serve [--port 8080] [--backend llama|mock]
 localcoder doctor
 localcoder agent "<task>" [--model <id>] [--session <id>] [--resume <task_id>]
 localcoder undo [task_id] [--force]
-localcoder models [add <file.gguf> | remove <id>]
+localcoder models list [--downloaded]
+localcoder models download <id>
+localcoder models add <file.gguf> | remove <id>
+localcoder config [list | path | get <key> | set <key> <json> | unset <key>]
 localcoder verify [--model <file.gguf>] [--llama-server <path>] [--skip-agent] [--json-trials N] [--agent-seconds N]
 ```
 
@@ -15,9 +18,24 @@ localcoder verify [--model <file.gguf>] [--llama-server <path>] [--skip-agent] [
 
 - **`serve`** — starts the local API server. Defaults to the real `llama-server` backend on port 8080; pass `--backend mock` to exercise the full pipeline with stub responses instead (no model download needed).
 - **`doctor`** — one-shot diagnostic: detected hardware, computed memory budget, chosen power mode, the engine path resolved from configuration or `PATH`, and which registered model (if any) would currently be selected.
-- **`models`** — lists the shipped and user-registered models with its size, context window, and whether the GGUF file is actually present on disk yet.
+- **`models`** — lists catalog and custom models with their size, context window, and download status. See the [model download and sizing guide](MODELS.md).
 
 For a one-model task, pick an installed ID from `localcoder models list` and run `localcoder agent "Fix the failing parser test" --model <id>`. This overrides the project’s role configuration for the run. Repeat the flag when resuming that task to keep the same model. A task with saved planner, coder, and reviewer assignments resumes with those assignments.
+
+## Project settings
+
+Run these commands from the project directory. `config list` shows the project overrides and detected npm scripts. `config path` reports the workspace file, and `config unset` restores the default for a setting.
+
+```bash
+localcoder config list
+localcoder config set models '{"planner":"qwen2.5-coder-0.5b-q4","coder":"qwen2.5-coder-1.5b-q4","reviewer":"qwen2.5-coder-0.5b-q4"}'
+localcoder config set test '["node","--test"]'
+localcoder config set timeout_ms 60000
+localcoder config get models
+localcoder config unset timeout_ms
+```
+
+Command settings use JSON arrays of arguments. Use `test`, `test_target`, `lint`, `lint_target`, `format_target`, and `build` to configure available checks. Use `timeout_ms` and `max_result_bytes` for command limits. Use `serve --port` and `serve --backend` to choose how to start the server. Set `LOCALCODER_API_TOKEN` in the environment for API authentication.
 
 ## API
 
