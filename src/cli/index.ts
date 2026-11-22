@@ -64,7 +64,7 @@ async function main() {
           '  localcoder search "<query>"',
           '  localcoder symbols "<query>"',
           '  localcoder context "<query>" [--file <path>] [--symbol <name>] [--budget N] [--explain]',
-          '  localcoder agent "<task>" [--session <id>] [--resume <task_id>] [--backend llama|mock]',
+          '  localcoder agent "<task>" [--model <id>] [--session <id>] [--resume <task_id>] [--backend llama|mock]',
           '  localcoder undo [task_id] [--force]',
           '  localcoder memory [status|list|add|refresh|delete]',
           '  localcoder task [new "<title>" "<summary>" [files...]|done]',

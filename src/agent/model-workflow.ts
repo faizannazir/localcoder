@@ -54,16 +54,22 @@ export class SequentialModelWorkflow implements AgentModelWorkflow {
 }
 
 /** Resolve saved assignments before generic routing, including implicit "continue" requests. */
-export async function prepareAgentRun(root: string, request: AgentRequest, deps: WorkflowDependencies): Promise<{
+export async function prepareAgentRun(root: string, request: AgentRequest, deps: WorkflowDependencies, modelId?: string): Promise<{
   request: AgentRequest; config: AgentConfig; models?: AgentModels; preflight: Preflight;
 }> {
   const config = loadAgentConfig(root);
   const store = new AgentStateStore(root);
   const resumeId = store.resolveResumeId(request);
   const saved = resumeId ? store.load(resumeId) : undefined;
+  const resolved = { ...request, resume_task_id: resumeId };
+  if (modelId) {
+    if (saved?.models) throw new Error("This task has saved role assignments. Resume it without --model.");
+    const registry = deps.registry.filter((entry) => entry.model_id === modelId);
+    if (!registry.length) throw new Error(`Model "${modelId}" is not installed. Run localcoder models list.`);
+    return { request: resolved, config, preflight: await preflightAgent({ ...deps, registry }) };
+  }
   const storedModels = saved ? saved.models : config.models;
   const models = storedModels === undefined ? undefined : parseAgentModels(storedModels);
-  const resolved = { ...request, resume_task_id: resumeId };
   if (!models) return { request: resolved, config, preflight: await preflightAgent(deps) };
   let first: Preflight | undefined;
   for (const role of MODEL_ROLES) {

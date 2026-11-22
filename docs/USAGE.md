@@ -5,7 +5,7 @@
 ```bash
 localcoder serve [--port 8080] [--backend llama|mock]
 localcoder doctor
-localcoder agent "<task>" [--session <id>] [--resume <task_id>]
+localcoder agent "<task>" [--model <id>] [--session <id>] [--resume <task_id>]
 localcoder undo [task_id] [--force]
 localcoder models [add <file.gguf> | remove <id>]
 localcoder verify [--model <file.gguf>] [--llama-server <path>] [--skip-agent] [--json-trials N] [--agent-seconds N]
@@ -16,6 +16,8 @@ localcoder verify [--model <file.gguf>] [--llama-server <path>] [--skip-agent] [
 - **`serve`** — starts the local API server. Defaults to the real `llama-server` backend on port 8080; pass `--backend mock` to exercise the full pipeline with stub responses instead (no model download needed).
 - **`doctor`** — one-shot diagnostic: detected hardware, computed memory budget, chosen power mode, the engine path resolved from configuration or `PATH`, and which registered model (if any) would currently be selected.
 - **`models`** — lists the shipped and user-registered models with its size, context window, and whether the GGUF file is actually present on disk yet.
+
+For a one-model task, pick an installed ID from `localcoder models list` and run `localcoder agent "Fix the failing parser test" --model <id>`. This overrides the project’s role configuration for the run. Repeat the flag when resuming that task to keep the same model. A task with saved planner, coder, and reviewer assignments resumes with those assignments.
 
 ## API
 

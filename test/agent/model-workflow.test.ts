@@ -83,3 +83,19 @@ test("queued cancellation never loads a role; resource gates refresh after prior
   await assert.rejects(new SequentialModelWorkflow(d, models).withRole("reviewer", async () => assert.fail("unfit role cannot execute")), /reviewer model.*0\.40 GB.*review needs 2\.00 GB/);
   assert.equal(d.modelManager.resident().length, 0);
 });
+
+test("an explicit model overrides project role defaults and preserves saved role assignments", async () => {
+  const repo = await makeRepo({ config: { models } });
+  try {
+    const d = deps();
+    const prepared = await prepareAgentRun(repo.root, { task: "fix" }, d, "code");
+    assert.equal(prepared.models, undefined);
+    assert.ok(prepared.preflight.ok);
+    assert.equal(prepared.preflight.decision.model_id, "code");
+    await assert.rejects(prepareAgentRun(repo.root, { task: "fix" }, d, "missing"), /not installed/);
+
+    const saved = { ...newState("fix", "s"), models };
+    new AgentStateStore(repo.root).save(saved);
+    await assert.rejects(prepareAgentRun(repo.root, { task: "continue", resume_task_id: saved.task_id }, d, "code"), /saved role assignments/);
+  } finally { repo.cleanup(); }
+});

@@ -10,11 +10,17 @@ function flag(args: string[], name: string): string | undefined {
 }
 
 export async function runAgent(args: string[]): Promise<void> {
+  const modelId = flag(args, "--model");
+  if (args.includes("--model") && (!modelId || modelId.startsWith("--"))) {
+    console.error("localcoder: --model requires an installed model ID. Run localcoder models list.");
+    process.exitCode = 1;
+    return;
+  }
   const task = args.find((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1].startsWith("--")));
-  if (!task) { console.log('Usage: localcoder agent "<task>" [--session <id>] [--resume <task_id>] [--backend llama|mock]'); process.exitCode = 1; return; }
+  if (!task) { console.log('Usage: localcoder agent "<task>" [--model <id>] [--session <id>] [--resume <task_id>] [--backend llama|mock]'); process.exitCode = 1; return; }
   const ctx = buildContext({ backend: flag(args, "--backend") as "llama" | "mock" | undefined });
   let prepared;
-  try { prepared = await prepareAgentRun(ctx.repoRoot, { task, session_id: flag(args, "--session"), resume_task_id: flag(args, "--resume") }, ctx); }
+  try { prepared = await prepareAgentRun(ctx.repoRoot, { task, session_id: flag(args, "--session"), resume_task_id: flag(args, "--resume") }, ctx, modelId); }
   catch (error) { console.error(`localcoder: ${(error as Error).message}`); process.exitCode = 1; return; }
   const pre = prepared.preflight;
   if (!pre.ok) { console.error(`localcoder: ${pre.message} (${pre.reason})`); process.exitCode = 1; return; }
