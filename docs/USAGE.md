@@ -252,7 +252,7 @@ HTTP: `POST /v1/agent/run {"task": "...", "session_id"?, "resume_task_id"?}` str
   "lint_target": ["eslint", "{file}"], "format_target": ["prettier", "--write", "{file}"], "build": ["npm", "run", "build"] }
 ```
 
-Without a configured test command the agent can only do a built-in syntax check (JS/Python) and will report `verification: syntax_only` or `none` — it does not claim the change is tested.
+If a full test command is configured, the agent runs it even when the model says no edit is needed. A failing check sends its output back to the model for a bounded repair attempt. Without a configured test command, the agent reports the level of checks it could run, such as `syntax_only` or `none`.
 
 **Evaluate a trained model.** install `llama-server`, download a model from `registry/models.json` that fits `localcoder doctor`, then run `localcoder agent "<small task>"` in a throwaway git repo and review the printed diff. Expect small local models to sometimes produce invalid edit JSON; the agent retries once, then stops with a resumable error.
 

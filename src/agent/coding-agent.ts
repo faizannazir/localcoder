@@ -577,7 +577,7 @@ export class CodingAgent implements ICodingAgent {
     const changed = this.changedPaths();
     // Delta: only files that changed, or that the failure output names, are re-sent in full.
     const mentioned = Object.keys(this.state.files_read).filter((p) => !changed.includes(p) && (failure.includes(p) || failure.includes(path.posix.basename(p))));
-    const focusPaths = [...changed, ...mentioned];
+    const focusPaths = changed.length ? [...changed, ...mentioned] : [...new Set([...mentioned, ...Object.keys(this.state.files_read)])];
     const views = yield* this.loadFocus(focusPaths);
     const omitted = Object.entries(this.state.files_read).filter(([p]) => !focusPaths.includes(p)).map(([p, h]) => `- ${p} (unchanged since read, hash ${h.slice(0, 8)}; omitted)`).join("\n");
     const diff = this.finalDiff(changed);
@@ -603,7 +603,6 @@ export class CodingAgent implements ICodingAgent {
     const s = this.state;
     this.checkDeletedFiles();
     const next = this.d.modelWorkflow ? "REVIEW" : "DONE";
-    if (s.edits.length === 0 && !this.d.modelWorkflow) { s.summary = s.reasoning; s.verification = "none"; transition(s, next); return; }
     if (this.d.config.test) {
       const r = yield* this.callTool("run_tests", {});
       if (r.ok) {
@@ -614,20 +613,16 @@ export class CodingAgent implements ICodingAgent {
         return;
       }
       const dd = r.data as any;
-      if (dd?.exit_code === undefined) {
-        if (this.d.modelWorkflow) throw new Error(`configured full test run could not start: ${r.error}`);
-        s.warnings.push(`full test run could not start: ${r.error}`);
-      } else {
-        const summary = `full test run failed:\n${dd.summary}`;
-        s.validation = { stage: "targeted", ok: false, summary, ref: dd.output_ref, skipped: [] };
-        const prior = [...s.observations].reverse().find((o) => !o.ok && this.norm(o.summary) === this.norm(summary.slice(0, 3000)));
-        if (prior) s.no_progress++; else s.no_progress = 0;
-        yield* this.observe("run_tests", false, prior ? `same full-suite failure as observation #${prior.id}` : summary, dd.output_ref, prior?.id);
-        if (s.no_progress >= 2) { this.fail("no progress: the same full-suite failure repeated"); return; }
-        if (s.fix_attempts >= this.limits.max_fix_attempts) { this.fail(`fix attempts exhausted (${this.limits.max_fix_attempts})`); return; }
-        transition(s, "FIX");
-        return;
-      }
+      if (dd?.exit_code === undefined) throw new Error(`configured full test run could not start: ${r.error}`);
+      const summary = `full test run failed:\n${dd.summary}`;
+      s.validation = { stage: "targeted", ok: false, summary, ref: dd.output_ref, skipped: [] };
+      const prior = [...s.observations].reverse().find((o) => !o.ok && this.norm(o.summary) === this.norm(summary.slice(0, 3000)));
+      if (prior) s.no_progress++; else s.no_progress = 0;
+      yield* this.observe("run_tests", false, prior ? `same full-suite failure as observation #${prior.id}` : summary, dd.output_ref, prior?.id);
+      if (s.no_progress >= 2) { this.fail("no progress: the same full-suite failure repeated"); return; }
+      if (s.fix_attempts >= this.limits.max_fix_attempts) { this.fail(`fix attempts exhausted (${this.limits.max_fix_attempts})`); return; }
+      transition(s, "FIX");
+      return;
     }
     s.verification = s.ran_targeted_ok ? "targeted" : s.ran_lint_ok ? "syntax_only" : "none";
     transition(s, next);

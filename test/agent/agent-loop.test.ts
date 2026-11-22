@@ -12,6 +12,24 @@ const types = (evs: AgentEvent[]) => evs.map((e) => e.type);
 const calc = (root: string) => readFileSync(path.join(root, "calc.js"), "utf8");
 const GOAL = "Fix the add function so the tests pass";
 
+test("a single-model no-change answer still runs configured tests and repairs a failure", async () => {
+  const repo = await makeRepo();
+  try {
+    const backend = new ScriptedBackend((_n, prompt) => {
+      if (prompt.includes('"queries"')) return PLAN_JSON;
+      if (prompt.includes("## validation_failure")) {
+        assert.match(prompt, /return a - b;/, "the repair needs the previously read source");
+        return JSON.stringify({ edits: [{ op: "replace", path: "calc.js", old_text: "return a - b;", new_text: "return a + b;" }] });
+      }
+      return JSON.stringify({ reasoning: "No change needed", no_change_needed: true, edits: [] });
+    });
+    const events = await collect(makeAgent(repo, backend).run({ task: GOAL }));
+    assert.equal(events.find((e) => e.type === "done")?.verification, "full");
+    assert.equal(calc(repo.root), CALC_FIXED);
+    assert.ok(events.some((e) => e.type === "tool_result" && e.name === "run_tests" && !e.result.ok));
+  } finally { repo.cleanup(); }
+});
+
 test("end-to-end: real edits, real subprocess tests, test→observe→fix loop, final diff, done(verified)", async () => {
   const repo = await makeRepo();
   try {
