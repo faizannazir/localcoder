@@ -161,6 +161,26 @@ The API supports these chat clients' request formats. The desktop extension flow
 
 Cline, Aider, OpenCode, Continue Agent mode, and other integrations should not be advertised as plug-and-play until their actual request formats and workflows are tested. Continue [documents tool-use capability as required for Agent mode](https://docs.continue.dev/customize/deep-dives/model-capabilities).
 
+## Apple Foundation Model chat on macOS 27
+
+If Apple Intelligence is available on your Mac, macOS 27 can serve the built-in `system` model directly for terminal chat or an IDE chat client. Apple manages the model files, so this setup needs no GGUF download or llama.cpp installation. If `fm` prompts for its machine-wide terms, review them before proceeding. [Apple's fm CLI guide](https://developer.apple.com/videos/play/wwdc2026/334/)
+
+```bash
+fm available
+fm chat
+```
+
+For editor chat, start the Apple server on loopback in a separate terminal.
+
+```bash
+fm serve --host 127.0.0.1 --port 1976
+curl http://127.0.0.1:1976/v1/models
+```
+
+In Continue's OpenAI provider configuration above, set the model to `system` and the API base to `http://127.0.0.1:1976/v1`. In VS Code's Chat Completions custom endpoint, the model ID is `system` and the URL is `http://127.0.0.1:1976/v1/chat/completions`. Use the text chat role. Press Ctrl+C in the Apple server terminal to stop it.
+
+This connects the editor directly to Apple. LocalCoder's repository agent, routed model roles, and undo are available through the LocalCoder CLI and API with supported GGUF models.
+
 ## Runtime behavior
 
 - Resource policy selects the power mode automatically from hardware readings.
