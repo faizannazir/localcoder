@@ -13,7 +13,7 @@ import { AgentState, AgentStateStore, ProposedEdit, ReviewResult, isTerminal, ne
 import { BudgetError, PromptSection, fitPrompt } from "./prompt";
 import { extractJson } from "./json-extract";
 import { diffStats, unifiedDiff } from "./unified-diff";
-import { hashText, loadBackup, writeAtomic } from "./workdir";
+import { fileVersion, hashText, loadBackup, writeAtomic } from "./workdir";
 import { AgentConfig, ModelRole, parseAgentModels } from "./config";
 import type { AgentModelWorkflow, RoleModel } from "./model-workflow";
 import { EstimatingTokenCounter } from "../context/token-counter";
@@ -48,7 +48,7 @@ export interface AgentDeps {
   limits?: { max_fix_attempts?: number; max_reason_retries?: number; max_iterations?: number };
 }
 
-interface View { path: string; content: string; start: number; end: number; total: number; hash: string; partial: boolean }
+interface View { path: string; content: string; start: number; end: number; total: number; hash: string; version?: string; partial: boolean }
 
 export class CodingAgent implements ICodingAgent {
   private limits: Required<NonNullable<AgentDeps["limits"]>>;
@@ -119,6 +119,8 @@ export class CodingAgent implements ICodingAgent {
       s.error = (e as Error).message;
       this.save();
       yield { type: "error", task_id: s.task_id, phase: s.phase, message: s.error, recoverable: true };
+    } finally {
+      this.views.clear();
     }
   }
 
@@ -219,11 +221,18 @@ export class CodingAgent implements ICodingAgent {
 
   private async *ensureView(p: string): AsyncGenerator<AgentEvent, View | null> {
     const cached = this.views.get(p);
-    if (cached) return cached;
+    if (cached?.version) {
+      const checked = this.sandbox.resolve(p, false);
+      if (checked.ok && checked.rel === cached.path) {
+        const stat = statSync(checked.abs, { bigint: true, throwIfNoEntry: false });
+        if (stat?.isFile() && fileVersion(stat) === cached.version) return cached;
+      }
+    }
+    this.views.delete(p);
     const res = yield* this.callTool("read_file", { path: p });
     if (!res.ok) { yield* this.observe("read_file", false, `could not read ${p}: ${res.error}`); return null; }
     const dd = res.data as any;
-    const v: View = { path: dd.path, content: dd.content, start: dd.start_line, end: dd.end_line, total: dd.total_lines, hash: dd.hash, partial: dd.partial };
+    const v: View = { path: dd.path, content: dd.content, start: dd.start_line, end: dd.end_line, total: dd.total_lines, hash: dd.hash, version: dd.version, partial: dd.partial };
     this.views.set(p, v);
     this.state.files_read[p] = dd.hash;
     return v;
@@ -271,7 +280,7 @@ export class CodingAgent implements ICodingAgent {
     };
     const out = yield* this.askModel("planner", PLAN_SYS, sections, (o) => {
       const x = o as any;
-      const strs = (v: unknown) => (Array.isArray(v) ? v.filter((s) => typeof s === "string" && s.trim()) as string[] : []);
+      const strs = (v: unknown) => Array.isArray(v) ? [...new Set(v.filter((s): s is string => typeof s === "string").map((s) => s.trim()).filter(Boolean))] : [];
       const plan = strs(x.plan).slice(0, 6);
       if (plan.length === 0) throw new Error('"plan" must be a non-empty array of strings');
       return { plan, queries: strs(x.queries).slice(0, 4), files: strs(x.files).slice(0, 6) };
@@ -284,7 +293,7 @@ export class CodingAgent implements ICodingAgent {
   private async *doSearch(): AsyncGenerator<AgentEvent> {
     const hits: { path: string; line?: number; symbol?: string }[] = [];
     const collect = (r: ToolResult) => { if (r.ok) for (const h of (r.data as any).hits) hits.push({ path: h.path, line: h.line_start, symbol: h.symbol }); };
-    for (const q of this.state.queries) {
+    for (const q of new Set(this.state.queries.map((query) => query.trim()).filter(Boolean))) {
       collect(yield* this.callTool("search", { query: q, kind: "text", k: 5 }));
       if (/^[A-Za-z_][\w.]*$/.test(q)) collect(yield* this.callTool("find_symbol", { name: q }));
     }
@@ -571,7 +580,6 @@ export class CodingAgent implements ICodingAgent {
     if (!this.d.modelWorkflow || !this.state.models) throw new Error("review requires the saved model workflow");
     const changed = this.changedPaths();
     const paths = [...new Set([...changed, ...Object.keys(this.state.files_read)])];
-    for (const p of paths) this.views.delete(p);
     const views = yield* this.loadFocus(paths);
     const result = yield* this.askModel("reviewer", REVIEW_SYS, async () => [
       { id: "goal", text: this.state.goal, priority: 100, required: true },

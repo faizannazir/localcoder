@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import path from "path";
 import { CodingAgent, AgentDeps } from "../../src/agent/coding-agent";
 import { AgentStateStore } from "../../src/agent/state";
@@ -33,6 +33,38 @@ function setup(repo: Repo, reply: (role: ModelRole, prompt: string) => string, o
     policy: POLICY, decision: DECISION, stateStore: new AgentStateStore(repo.root), config, modelWorkflow: workflow, ...opts });
   return { agent, roles, prompts, live: () => live };
 }
+
+test("discovery deduplicates search terms and review reuses only unchanged file views", async () => {
+  const repo = await makeRepo();
+  try {
+    const config = loadAgentConfig(repo.root);
+    const runtime = new DefaultToolRuntime({ root: repo.root, index: repo.store, indexService: repo.indexService, config });
+    const tools: AgentDeps["tools"] = {
+      schemas: () => runtime.schemas(),
+      async invoke(name, args, sandbox) {
+        const result = await runtime.invoke(name, args, sandbox);
+        if (name === "run_tests" && !args.target) {
+          const util = path.join(repo.root, "util.js");
+          writeFileSync(util, readFileSync(util, "utf8").replace("UTIL_MARKER_LINE", "LIVE_MARKER_LINE"));
+        }
+        return result;
+      },
+    };
+    const s = setup(repo, (role, prompt) => {
+      if (role === "planner") return PLAN_JSON.replace('["add"]', '["add"," add ","add","return a - b;"]');
+      if (role === "reviewer") {
+        assert.match(prompt, /LIVE_MARKER_LINE/);
+        return approved;
+      }
+      return edit("return a - b;", "return a + b;");
+    }, { tools });
+    const events = await collect(s.agent.run({ task: "Fix addition" }));
+    assert.ok(events.find((e) => e.type === "done")?.success);
+    const calls = events.filter((e) => e.type === "tool_call");
+    assert.equal(calls.filter((e) => e.name === "search" || e.name === "find_symbol").length, 3);
+    assert.deepEqual(calls.filter((e) => e.name === "read_file" && e.phase === "REVIEW").map((e) => (e.args as { path: string }).path), ["calc.js", "util.js"]);
+  } finally { repo.cleanup(); }
+});
 
 test("workflow plans, edits, runs real tests, reviews, repairs review findings and reviews again", async () => {
   const repo = await makeRepo();

@@ -7,7 +7,7 @@ import { Sandbox, redactSecrets } from "./sandbox";
 import { runCommand } from "./command-runner";
 import type { AgentConfig } from "./config";
 import { applyUnifiedPatch, unifiedDiff, diffStats } from "./unified-diff";
-import { hashText, storeBackup, storeOutput, writeAtomic } from "./workdir";
+import { fileVersion, hashText, storeBackup, storeOutput, writeAtomic } from "./workdir";
 
 const READ_LIMIT_BYTES = 16_000;
 const MAX_WRITE_BYTES = 512 * 1024;
@@ -104,8 +104,9 @@ export class DefaultToolRuntime implements ToolRuntime {
   private readFile(args: Record<string, unknown>): ToolResult {
     const c = this.sb.resolve(args.path, false);
     if (!c.ok) return fail(c.reason);
-    if (!existsSync(c.abs) || !statSync(c.abs).isFile()) return fail("file not found");
-    if (statSync(c.abs).size > MAX_READ_FILE) return fail("file too large to read (>2MB)");
+    const stat = statSync(c.abs, { bigint: true, throwIfNoEntry: false });
+    if (!stat?.isFile()) return fail("file not found");
+    if (stat.size > MAX_READ_FILE) return fail("file too large to read (>2MB)");
     const content = readFileSync(c.abs, "utf8");
     if (content.includes("\0")) return fail("binary file");
     const lines = content.split("\n");
@@ -120,7 +121,7 @@ export class DefaultToolRuntime implements ToolRuntime {
       out.push(lines[i]); bytes += b; last = i + 1;
     }
     const partial = !(start === 1 && last === total);
-    return ok({ path: c.rel, start_line: start, end_line: last, total_lines: total, content: out.join("\n"), hash: hashText(content), partial }, partial);
+    return ok({ path: c.rel, start_line: start, end_line: last, total_lines: total, content: out.join("\n"), hash: hashText(content), version: fileVersion(stat), partial }, partial);
   }
 
   private async commit(rel: string, abs: string, before: string | null, after: string, mode: string): Promise<ToolResult> {

@@ -1,8 +1,11 @@
 import { createHash, randomBytes } from "crypto";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, renameSync, statSync, openSync, closeSync, fchmodSync, unlinkSync } from "fs";
 import path from "path";
+import type { BigIntStats } from "fs";
 
 export const hashText = (t: string) => createHash("sha256").update(t).digest("hex");
+export const fileVersion = (stat: BigIntStats) =>
+  [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":");
 export const agentDir = (root: string) => path.join(root, ".localcoder", "agent");
 
 /** Content-addressed pre-edit backups: the "before" side of the undo journal. Never garbage-collected (documented limitation). */
