@@ -1,6 +1,7 @@
 import type { ServerResponse } from "http";
 import type { AppContext } from "../context";
 import { isDownloaded } from "../../router/registry";
+import { isRejection } from "../../types/index";
 
 export async function handleModels(_body: unknown, res: ServerResponse, ctx: AppContext): Promise<void> {
   const residentIds = new Set(ctx.modelManager.resident().map((m) => m.model_id));
@@ -17,4 +18,34 @@ export async function handleModels(_body: unknown, res: ServerResponse, ctx: App
 
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ object: "list", data: models }));
+}
+
+export async function handleModelResidency(body: unknown, res: ServerResponse, ctx: AppContext, operation: "load" | "unload"): Promise<void> {
+  const model = (body as { model?: unknown } | null)?.model;
+  const reply = (status: number, payload: unknown) => {
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(payload));
+  };
+  if (typeof model !== "string" || !model.trim()) {
+    reply(400, { error: { message: "Provide a model ID." } });
+    return;
+  }
+  const entry = ctx.registry.find((candidate) => candidate.model_id === model);
+  if (!entry) {
+    reply(404, { error: { message: `Model "${model}" is not installed on this server.` } });
+    return;
+  }
+  if (operation === "unload") {
+    await ctx.modelManager.unload(model);
+    reply(200, { model, resident: false });
+    return;
+  }
+  const policy = ctx.policyEngine.derive(await ctx.profiler.sample());
+  const decision = ctx.router.route("chat_simple", policy, [entry]);
+  if (isRejection(decision)) {
+    reply(503, { error: { message: `Model "${model}" does not fit the current memory budget.`, attempted: decision.attempted } });
+    return;
+  }
+  await ctx.modelManager.ensure(decision, policy, 5);
+  reply(200, { model, resident: true });
 }

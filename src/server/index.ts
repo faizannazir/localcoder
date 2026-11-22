@@ -14,7 +14,7 @@ import { indexDbPath, openIndexStore } from "../index/open";
 import { DefaultContextManager } from "../context/context-manager";
 import { EstimatingTokenCounter } from "../context/token-counter";
 import type { AppContext } from "./context";
-import { handleModels } from "./routes/models";
+import { handleModelResidency, handleModels } from "./routes/models";
 import { handleResource } from "./routes/resource";
 import { handleChatCompletions } from "./routes/chat";
 import { handleCompletions } from "./routes/completions";
@@ -118,6 +118,9 @@ export function createServer(ctx: AppContext, security: SecurityOptions = securi
 
       if (method === "GET" && url === "/v1/models") {
         return await handleModels(undefined, res, ctx);
+      }
+      if (method === "POST" && (url === "/v1/models/load" || url === "/v1/models/unload")) {
+        return await handleModelResidency(await readJsonBody(req), res, ctx, url.endsWith("/unload") ? "unload" : "load");
       }
       if (method === "GET" && url === "/v1/resource") {
         return await handleResource(undefined, res, ctx);

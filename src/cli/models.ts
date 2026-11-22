@@ -3,6 +3,7 @@ import path from "path";
 import { loadFullRegistry, isDownloaded } from "../router/registry";
 import { userDataDir, userModelsDir } from "../util/paths";
 import { downloadModel, modelDownloads } from "../router/model-download";
+import { parseServerPort, serverRequest } from "./server-client";
 import { entryFromGguf, readGgufMeta, summarizeGguf } from "../inference/gguf";
 import type { ModelRegistryEntry } from "../types/index";
 
@@ -30,6 +31,25 @@ export function removeLocalModel(registryDir: string, id: string): boolean {
 }
 
 export async function runModels(args: string[] = []): Promise<void> {
+  const [operation, model, portFlag, portValue] = args;
+  if (operation === "ps") {
+    if (args.length !== 1 && (args.length !== 3 || model !== "--port")) {
+      throw new Error("Usage: localcoder models ps [--port <port>]");
+    }
+    const { data } = await serverRequest<{ data: { id: string; resident: boolean }[] }>(
+      model ? parseServerPort(portFlag) : 8080, "/v1/models");
+    const loaded = data.filter((entry) => entry.resident).map((entry) => entry.id);
+    console.log(loaded.length ? loaded.join("\n") : "No models loaded.");
+    return;
+  }
+  if (operation === "load" || operation === "unload") {
+    if (!model || (args.length !== 2 && (args.length !== 4 || portFlag !== "--port"))) {
+      throw new Error(`Usage: localcoder models ${operation} <id> [--port <port>]`);
+    }
+    await serverRequest(portFlag ? parseServerPort(portValue) : 8080, `/v1/models/${operation}`, { model });
+    console.log(`${operation === "load" ? "Loaded" : "Unloaded"} ${model}`);
+    return;
+  }
   const registryDir = userDataDir(); // user data, never the (possibly read-only) install directory
 
   if (args[0] === "add") {
@@ -72,7 +92,7 @@ export async function runModels(args: string[] = []): Promise<void> {
   }
   const downloadedOnly = args.length === 2 && args[0] === "list" && args[1] === "--downloaded";
   if (!downloadedOnly && args.length !== 0 && !(args.length === 1 && args[0] === "list")) {
-    throw new Error("Usage: localcoder models list [--downloaded] | download <id> | add <file.gguf> | remove <id>");
+    throw new Error("Usage: localcoder models list [--downloaded] | download <id> | add <file.gguf> | remove <id> | load <id> | unload <id>");
   }
   const rows = registry.filter((entry) => !downloadedOnly || isDownloaded(entry)).map((e) => ({
     model_id: e.model_id,

@@ -10,6 +10,9 @@ localcoder undo [task_id] [--force]
 localcoder models list [--downloaded]
 localcoder models download <id>
 localcoder models add <file.gguf> | remove <id>
+localcoder models load <id> | unload <id> [--port <port>]
+localcoder models ps [--port <port>]
+localcoder run <id> "<prompt>" [--port <port>]
 localcoder config [list | path | get <key> | set <key> <json> | unset <key>]
 localcoder verify [--model <file.gguf>] [--llama-server <path>] [--skip-agent] [--json-trials N] [--agent-seconds N]
 ```
@@ -21,6 +24,8 @@ localcoder verify [--model <file.gguf>] [--llama-server <path>] [--skip-agent] [
 - **`models`** — lists catalog and custom models with their size, context window, and download status. See the [model download and sizing guide](MODELS.md).
 
 For a one-model task, pick an installed ID from `localcoder models list` and run `localcoder agent "Fix the failing parser test" --model <id>`. This overrides the project’s role configuration for the run. Repeat the flag when resuming that task to keep the same model. A task with saved planner, coder, and reviewer assignments resumes with those assignments.
+
+With the server running, `localcoder run <id> "<prompt>"` sends a chat request from the terminal. Use `models load <id>` to warm a model, `models ps` to see what is in memory, and `models unload <id>` to release it after active requests finish. Unloading leaves the weights on disk. Pass `--port <port>` when the server uses a different port.
 
 ## Project settings
 

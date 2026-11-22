@@ -10,6 +10,7 @@ import { runMemory, runTask } from "./memory-cmd";
 import { runAgent, runUndo } from "./agent-cmd";
 import { runVerify } from "./verify";
 import { runConfig } from "./config";
+import { runPrompt } from "./server-client";
 
 async function main() {
   const [, , command, ...rest] = process.argv;
@@ -17,6 +18,9 @@ async function main() {
   switch (command) {
     case "serve":
       await runServe(rest);
+      return;
+    case "run":
+      await runPrompt(rest);
       return;
     case "doctor":
       await runDoctor();
@@ -62,9 +66,12 @@ async function main() {
           "",
           "Usage:",
           "  localcoder serve [--port 8080] [--backend llama|mock]",
+          '  localcoder run <id> "<prompt>" [--port <port>]',
           "  localcoder doctor",
           "  localcoder models list [--downloaded]",
           "  localcoder models download <id>",
+          "  localcoder models load <id> | unload <id> [--port <port>]",
+          "  localcoder models ps [--port <port>]",
           "  localcoder models add <file.gguf> | remove <id>",
           "  localcoder config [list|path|get|set|unset]",
           "  localcoder index [path] [--status] [--clear] [--watch]",

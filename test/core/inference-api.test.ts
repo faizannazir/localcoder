@@ -63,6 +63,27 @@ test("GET /v1/models responds with the registry within budget", async () => {
   }
 });
 
+test("model residency can be inspected, loaded, and unloaded over HTTP", async () => {
+  const { port, cleanup } = await startTestServer();
+  const url = `http://127.0.0.1:${port}/v1/models`;
+  const model = "tiny-test-model";
+  const change = (operation: string, id: string) => fetch(`${url}/${operation}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: id }),
+  });
+  const resident = async () => {
+    const payload = await (await fetch(url)).json() as { data: { resident: boolean }[] };
+    return payload.data[0].resident;
+  };
+  try {
+    assert.equal(await resident(), false);
+    assert.equal((await change("load", "missing")).status, 404);
+    assert.deepEqual(await (await change("load", model)).json(), { model, resident: true });
+    assert.equal(await resident(), true);
+    assert.deepEqual(await (await change("unload", model)).json(), { model, resident: false });
+    assert.equal(await resident(), false);
+  } finally { await cleanup(); }
+});
+
 test("POST /v1/chat/completions streams a successful OpenAI-compatible response end-to-end", async () => {
   const { port, cleanup } = await startTestServer();
   try {
