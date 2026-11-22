@@ -37,13 +37,6 @@ CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name);
 CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
 `;
 
-function snippetAround(content: string, startLine: number, endLine: number, contextLines = 2): string {
-  const lines = content.split("\n");
-  const from = Math.max(0, startLine - 1 - contextLines);
-  const to = Math.min(lines.length, endLine + contextLines);
-  return lines.slice(from, to).join("\n");
-}
-
 export class SqliteIndexStore implements IndexStore {
   private db: DatabaseSync;
 
@@ -152,38 +145,36 @@ export class SqliteIndexStore implements IndexStore {
     }));
   }
 
-  /**
-   * Fallback text search — see docs/USAGE.md's ripgrep note. This is the path actually
-   * exercised in any environment without `rg` on PATH; a real project deployment with
-   * ripgrep installed should prefer it for speed on very large repositories (wiring point
-   * left for the IndexService layer, which owns the "prefer rg if present" decision — kept
-   * out of the store itself so the store stays a pure, testable persistence layer).
-   */
+  /** Search the indexed snapshot and retain only the best matches in stable rank order. */
   private queryText(q: string, k: number): SearchResult[] {
+    const limit = Math.floor(k);
+    if (!(limit > 0)) return [];
     const needle = q.toLowerCase();
-    const rows = this.db.prepare(`SELECT path, content FROM files`).all() as { path: string; content: string }[];
+    const rows = this.db.prepare(`SELECT path, content FROM files`).iterate() as Iterable<{ path: string; content: string }>;
 
     const results: SearchResult[] = [];
     for (const row of rows) {
       const lines = row.content.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        const hay = lines[i].toLowerCase();
-        if (hay.includes(needle)) {
-          results.push({
-            path: row.path,
-            kind: "text",
-            score: lines[i].trim().length > 0 ? 1 / (1 + Math.abs(lines[i].length - q.length)) : 0.1,
-            line_start: i + 1,
-            line_end: i + 1,
-            snippet: snippetAround(row.content, i + 1, i + 1),
-            reason: "text match (fallback scanner — ripgrep not on PATH)",
-          });
+      for (const [i, line] of lines.entries()) {
+        if (!line.toLowerCase().includes(needle)) continue;
+        const score = line.trim().length > 0 ? 1 / (1 + Math.abs(line.length - q.length)) : 0.1;
+        if (results.length === limit && score <= results[limit - 1].score) continue;
+        let low = 0;
+        let high = results.length;
+        while (low < high) {
+          const mid = Math.floor((low + high) / 2);
+          if (results[mid].score < score) high = mid;
+          else low = mid + 1;
         }
+        results.splice(low, 0, {
+          path: row.path, kind: "text", score, line_start: i + 1, line_end: i + 1,
+          snippet: lines.slice(Math.max(0, i - 2), i + 3).join("\n"),
+          reason: "text match in the repository index",
+        });
+        if (results.length > limit) results.pop();
       }
     }
-
-    results.sort((a, b) => b.score - a.score);
-    return results.slice(0, k);
+    return results;
   }
 
   async clear(): Promise<void> {

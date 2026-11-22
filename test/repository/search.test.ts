@@ -57,6 +57,15 @@ test("top-k limiting is respected for both symbol and text search", async () => 
   }
 });
 
+test("text ranking keeps late high-score matches, stable ties, and Unicode case folding", async () => {
+  const { store, cleanup } = await setupIndexed({ "rank.txt": "  extra ÄBC text\näßc\nÄBC!\nÄBC!\nÄBC\n" });
+  try {
+    const hits = await store.query("äbc", "text", 3);
+    assert.deepEqual(hits.map((hit) => hit.line_start), [5, 3, 4]);
+    assert.equal(hits[0].snippet, "ÄBC!\nÄBC!\nÄBC\n");
+  } finally { cleanup(); }
+});
+
 test("semantic search is gracefully unavailable — returns [] rather than silently substituting BM25/text results", async () => {
   const { store, cleanup } = await setupIndexed({ "a.ts": "export function foo() {}\n" });
   try {
