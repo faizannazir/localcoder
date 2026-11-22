@@ -228,6 +228,14 @@ export class MemoryStore {
       .run(entry.content_hash, entry.kind, entry.summary, entry.basis, entry.original_size_bytes, new Date().toISOString());
   }
 
+  pruneSummaryCache(keep: number): number {
+    if (!Number.isSafeInteger(keep) || keep < 0) throw new Error("The cache retention count must be a non-negative integer.");
+    const removed = this.db.prepare(`DELETE FROM summary_cache WHERE rowid IN (
+      SELECT rowid FROM summary_cache ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?
+    )`).run(keep).changes;
+    return Number(removed);
+  }
+
   close(): void {
     this.db.close();
   }

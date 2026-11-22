@@ -95,7 +95,7 @@ async function main() {
           '  localcoder agent "<task>" [--model <id>] [--delete-file <path>] [--session <id>] [--resume <task_id>] [--backend llama|mock]',
           "  localcoder files delete <path>",
           '  localcoder undo [task_id] [--force]',
-          '  localcoder memory [status|list|add|refresh|delete]',
+          '  localcoder memory [status|list|add|refresh|delete|prune-cache]',
           '  localcoder task [new "<title>" "<summary>" [files...]|done]',
         ].join("\n")
       );

@@ -40,11 +40,18 @@ export async function runMemory(args: string[]): Promise<void> {
       if (!id || !text) { console.log('Usage: localcoder memory refresh <id> "<text>"'); process.exitCode = 1; return; }
       await store.updateMemory(id, text);
       console.log(`Refreshed memory #${id} (no longer stale)`);
+    } else if (sub === "prune-cache") {
+      if (args.length > 2 || (args[1] !== undefined && !/^\d+$/.test(args[1]))) {
+        throw new Error("Usage: localcoder memory prune-cache [number-to-keep]");
+      }
+      const keep = args[1] === undefined ? 500 : Number(args[1]);
+      const removed = store.pruneSummaryCache(keep);
+      console.log(`Removed ${removed} cached summaries (kept up to ${keep}).`);
     } else if (sub === "delete") {
       store.deleteMemory(parseInt(args[1], 10));
       console.log(`Deleted memory #${args[1]}`);
     } else {
-      console.log("Usage: localcoder memory [status|list|add|refresh|delete]");
+      console.log("Usage: localcoder memory [status|list|add|refresh|delete|prune-cache]");
     }
   } catch (err) {
     console.error(`localcoder: ${(err as Error).message}`);

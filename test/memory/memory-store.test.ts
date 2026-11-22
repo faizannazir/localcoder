@@ -124,3 +124,22 @@ test("MemoryStore: cache get/set round-trips and is keyed by content hash", asyn
     cleanup();
   }
 });
+
+test("pruning removes only expendable summaries and keeps the newest cached entries", async () => {
+  const { store, cleanup } = tempStore();
+  try {
+    await store.addMemory("convention", "Use consistent field names.");
+    await store.upsertChatSummary("persistent", "Retain this context", null, [], []);
+    store.createTask("Finish parser", "Keep the active task.");
+    for (const key of ["old", "new"]) {
+      store.cacheSet({ content_hash: key, kind: "file", summary: key, basis: "heuristic", original_size_bytes: 1000 });
+    }
+    assert.equal(store.pruneSummaryCache(1), 1);
+    assert.equal(store.cacheGet("old"), null);
+    assert.equal(store.cacheGet("new")?.summary, "new");
+    assert.equal(store.pruneSummaryCache(0), 1);
+    assert.equal(store.listMemory().length, 1);
+    assert.ok(store.getChatSummary("persistent"));
+    assert.ok(store.getActiveTask());
+  } finally { cleanup(); }
+});

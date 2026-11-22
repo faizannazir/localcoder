@@ -222,6 +222,7 @@ localcoder context "fix token expiry" --file src/auth.ts --symbol validate --exp
 localcoder memory add architecture "Hexagonal; ports in src/ports" src/ports/index.ts
 localcoder memory list
 localcoder memory status
+localcoder memory prune-cache 500
 localcoder memory refresh <id> "<text>"
 localcoder memory delete <id>
 localcoder task new "Harden validator" "Add charset checks" src/auth.ts
@@ -229,6 +230,8 @@ localcoder context "continue"      # resumes the active task without replaying a
 ```
 
 `context` prints layers, raw vs optimized tokens, cache hit rate, stale memory skipped, and (with `--explain`) why each item was included or excluded. Token counts from the CLI are **estimated**. `.env`, keys, `.ssh` etc. are never indexed or stored in memory. Needs Node >= 22.13 (built-in SQLite; it prints an ExperimentalWarning).
+
+`memory prune-cache [number-to-keep]` keeps the newest generated file summaries in the current project's cache. The default is 500. Project memories, task history, conversation summaries, and undo backups are retained.
 
 ## Coding agent
 
