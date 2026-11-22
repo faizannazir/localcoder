@@ -13,7 +13,13 @@ LocalCoder runs a local coding assistant backed by llama.cpp. It combines hardwa
 
 ## Install
 
-Use **Node.js 22.13 or newer** and npm. From the repository root, install dependencies and build the CLI.
+Use **Node.js 22.13 or newer** and npm. For a trained-model setup on Apple Silicon, run this from the checkout:
+
+```bash
+bash scripts/setup-macos.sh
+```
+
+The installer downloads about 1.14 GB of pinned engine and model files. For other platforms or an existing engine, follow the [installation guide](docs/INSTALL.md). To install dependencies and build without downloading a model:
 
 ```bash
 npm ci
