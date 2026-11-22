@@ -80,6 +80,6 @@ test("queued cancellation never loads a role; resource gates refresh after prior
   controller.abort(); lease.release(); await rejection;
   assert.equal(d.modelManager.resident().length, 0);
   d.profiler.sample = async () => ({ ...FAKE_PROFILE, memory_budget_gb: 0.5 });
-  await assert.rejects(new SequentialModelWorkflow(d, models).withRole("reviewer", async () => assert.fail("unfit role cannot execute")), /reviewer model/);
+  await assert.rejects(new SequentialModelWorkflow(d, models).withRole("reviewer", async () => assert.fail("unfit role cannot execute")), /reviewer model.*0\.40 GB.*review needs 2\.00 GB/);
   assert.equal(d.modelManager.resident().length, 0);
 });

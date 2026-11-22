@@ -23,7 +23,14 @@ export async function preflightAgent(
   }
   const decision = deps.router.route("hard_agent", policy, deps.registry);
   if (isRejection(decision)) {
-    return { ok: false, reason: decision.reason, message: deps.registry.length === 0 ? "No models are installed. Run `localcoder models add <file.gguf>`." : "No registered model fits the current memory budget for an agent run.", attempted: decision.attempted };
+    if (!deps.registry.length) {
+      return { ok: false, reason: decision.reason, message: "No models are installed. Run `localcoder models add <file.gguf>`.", attempted: decision.attempted };
+    }
+    const smallest = decision.attempted.reduce<(typeof decision.attempted)[number] | undefined>(
+      (best, attempt) => !best || attempt.required_gb < best.required_gb ? attempt : best, undefined);
+    const requirement = smallest ? `; ${smallest.model_id} needs ${smallest.required_gb.toFixed(2)} GB at the smallest tried context and cache settings` : "";
+    return { ok: false, reason: decision.reason, attempted: decision.attempted,
+      message: `No registered model fits the current memory budget for an agent run (${policy.memory_budget_gb.toFixed(2)} GB available to LocalCoder${requirement}). Free some memory and retry.` };
   }
   return { ok: true, policy, decision, profile };
 }
