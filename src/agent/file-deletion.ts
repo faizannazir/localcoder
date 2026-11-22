@@ -2,7 +2,8 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, unl
 import path from "node:path";
 import type { Sandbox } from "./sandbox";
 import type { AgentState, AgentStateStore } from "./state";
-import { fileVersion, hashText, storeBackup } from "./workdir";
+import { fileVersion, hashBytes, storeBackup } from "./workdir";
+import { decodeWorkspaceText, lineEndings } from "../util/workspace-text";
 
 export function deletionPath(sandbox: Sandbox, input: string): { abs: string; rel: string } {
   const checked = sandbox.resolve(input, true);
@@ -34,13 +35,12 @@ export function deleteWorkspaceFile(sandbox: Sandbox, store: AgentStateStore, st
     bytes = readFileSync(fd);
     if (fileVersion(fstatSync(fd, { bigint: true })) !== fileVersion(stat)) throw new Error("File changed while it was being read.");
   } finally { closeSync(fd); }
-  const content = bytes.toString("utf8");
-  if (content.includes("\0") || !bytes.equals(Buffer.from(content))) throw new Error("Deletion supports UTF-8 text files only.");
-  const beforeHash = hashText(content);
+  const { text } = decodeWorkspaceText(bytes);
+  const beforeHash = hashBytes(bytes);
   if (expectedHash !== undefined && beforeHash !== expectedHash) throw new Error("File changed since it was read.");
 
   checkDeletionStorage(sandbox.realRoot);
-  const backup = storeBackup(sandbox.realRoot, content);
+  const backup = storeBackup(sandbox.realRoot, bytes);
   // Publish the backup and rollback record before making the path disappear.
   state.edits.push({ path: rel, op: "delete", before_hash: beforeHash, after_hash: null,
     before_mode: Number(stat.mode & 0o777n), backup_ref: backup, step: state.tool_calls });
@@ -54,5 +54,5 @@ export function deleteWorkspaceFile(sandbox: Sandbox, store: AgentStateStore, st
     store.save(state);
     throw error;
   }
-  return { path: rel, mode: "delete", lines_added: 0, lines_removed: content.split("\n").length - Number(content === "" || content.endsWith("\n")) };
+  return { path: rel, mode: "delete", lines_added: 0, lines_removed: lineEndings(text).length + Number(text.length > 0 && !/[\r\n]$/.test(text)) };
 }

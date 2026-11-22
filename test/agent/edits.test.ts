@@ -5,8 +5,8 @@ import path from "path";
 import { applyUnifiedPatch, unifiedDiff, diffStats } from "../../src/agent/unified-diff";
 import { DefaultToolRuntime } from "../../src/agent/tool-runtime";
 import { loadAgentConfig } from "../../src/agent/config";
-import { loadBackup, hashText } from "../../src/agent/workdir";
-import { makeRepo, CALC_BUGGY } from "./helpers";
+import { loadBackup, loadBackupBytes, hashBytes, hashText } from "../../src/agent/workdir";
+import { makeRepo, makeAgent, ScriptedBackend, collect, CALC_BUGGY } from "./helpers";
 
 const A = "one\ntwo\nthree\nfour\nfive\nsix\nseven\n";
 
@@ -70,5 +70,93 @@ test("apply_patch: exact-once replacement, ambiguity/missing/no-op refusals, sta
     const viaPatch = await call({ path: "calc.js", patch: "@@ -1,3 +1,3 @@\n function add(a, b) {\n-  return a + b;\n+  return b + a;\n }\n" });
     assert.ok(viaPatch.ok);
     assert.match(readFileSync(path.join(repo.root, "calc.js"), "utf8"), /return b \+ a;/);
+  } finally { repo.cleanup(); }
+});
+
+test("workspace edits and deletion preserve BOM, UTF-16 byte order, line endings, and exact undo bytes", async () => {
+  const repo = await makeRepo({ buggy: false });
+  const root = repo.root;
+  const encode = [
+    (text: string) => Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]),
+    (text: string) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, "utf16le")]),
+    (text: string) => Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, "utf16le").swap16()]),
+  ];
+  try {
+    const tools = new DefaultToolRuntime({ root, index: repo.store, indexService: repo.indexService, config: {} });
+    for (const [i, encoding] of encode.entries()) {
+      const name = `note-${i}.txt`;
+      const abs = path.join(root, name);
+      const before = encoding("café 😀\r\nold\r\n");
+      const after = encoding("café 😀\r\nnew\r\nvalue\r\n");
+      writeFileSync(abs, before);
+      const view = await tools.invoke("read_file", { path: name }, { workspaceRoot: root });
+      assert.ok(view.ok);
+      assert.equal((view.data as { hash: string }).hash, hashBytes(before));
+
+      const backend = new ScriptedBackend((_n, p) => p.includes('"queries"')
+        ? JSON.stringify({ plan: ["Update the note"], files: [name], queries: [] })
+        : JSON.stringify({ edits: [{ op: "replace", path: name, old_text: "old\n", new_text: "new\nvalue\n" }] }));
+      const agent = makeAgent(repo, backend);
+      assert.ok((await collect(agent.run({ task: `Update ${name}` }))).find((e) => e.type === "done")?.success);
+      assert.deepEqual(readFileSync(abs), after);
+      const task = agent.currentState;
+      assert.deepEqual(loadBackupBytes(root, task.edits[0].backup_ref!), before);
+      assert.equal((await repo.store.getFile(name))?.content_hash, hashBytes(after));
+
+      writeFileSync(abs, "café 😀\r\nnew\r\nvalue\r\n"); // identical text with different bytes
+      assert.equal((await agent.undo(task.task_id)).conflicts.length, 1);
+      assert.deepEqual((await agent.undo(task.task_id, { force: true })).restored, [name]);
+      assert.deepEqual(readFileSync(abs), before);
+
+      const deletion = await agent.deleteFile(name);
+      assert.deepEqual((await agent.undo(deletion.taskId)).restored, [name]);
+      assert.deepEqual(readFileSync(abs), before);
+    }
+  } finally { repo.cleanup(); }
+});
+
+test("unknown encodings are refused and mixed-line-ending files permit only preserving edits", async () => {
+  const repo = await makeRepo();
+  try {
+    const root = repo.root;
+    const tools = new DefaultToolRuntime({ root, index: repo.store, config: {} });
+    const encoded = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0d, 0x0a]); // Windows-1252
+    writeFileSync(path.join(root, "unknown.txt"), encoded);
+    const invoke = (tool: string, args: Record<string, unknown>) => tools.invoke(tool, args, { workspaceRoot: root });
+    assert.match((await invoke("apply_patch", { path: "unknown.txt", old_text: "caf", new_text: "tea" })).error!, /invalid file encoding/);
+    assert.deepEqual(readFileSync(path.join(root, "unknown.txt")), encoded);
+
+    const mixed = path.join(root, "mixed.txt");
+    writeFileSync(mixed, "one\r\ntwo\nthree\r");
+    assert.equal((await invoke("apply_patch", { path: "mixed.txt", old_text: "two", new_text: "second" })).ok, true);
+    assert.match((await invoke("apply_patch", { path: "mixed.txt", old_text: "second", new_text: "second\nextra" })).error!, /mixed line endings/);
+    assert.equal(readFileSync(mixed, "utf8"), "one\r\nsecond\nthree\r");
+    writeFileSync(mixed, "one\rtwo\nthree");
+    const view = await invoke("read_file", { path: "mixed.txt", start_line: 2, end_line: 2 });
+    assert.equal((view.data as { content: string }).content, "two");
+    assert.match((await invoke("apply_patch", { path: "mixed.txt", old_text: "two", new_text: "" })).error!, /mixed line endings/);
+    assert.equal(readFileSync(mixed, "utf8"), "one\rtwo\nthree");
+
+    writeFileSync(mixed, "x".repeat(15_999) + "😀\r\nnext\n");
+    const bounded = await invoke("read_file", { path: "mixed.txt" });
+    assert.ok(bounded.truncated);
+    assert.equal((bounded.data as { content: string }).content, "x".repeat(15_999));
+  } finally { repo.cleanup(); }
+});
+
+test("a formatter that emits UTF-8 with LF keeps the target's original encoding and CRLF", async () => {
+  const repo = await makeRepo();
+  try {
+    const root = repo.root;
+    const original = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("unformatted\r\n", "utf16le")]);
+    const expected = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("formatted\r\n", "utf16le")]);
+    const abs = path.join(root, "note.txt");
+    writeFileSync(abs, original);
+    const tools = new DefaultToolRuntime({ root, index: repo.store, config: {
+      format_target: [process.execPath, "-e", 'require("node:fs").writeFileSync(process.argv[1], "formatted\\n")', "{file}"],
+    } });
+    const result = await tools.invoke("run_formatter", { target: "note.txt" }, { workspaceRoot: root });
+    assert.ok(result.ok, result.error);
+    assert.deepEqual(readFileSync(abs), expected);
   } finally { repo.cleanup(); }
 });

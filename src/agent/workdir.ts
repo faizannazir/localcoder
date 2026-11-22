@@ -2,15 +2,17 @@ import { createHash, randomBytes } from "crypto";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, renameSync, statSync, openSync, closeSync, fchmodSync, unlinkSync, constants, lstatSync, fstatSync, linkSync } from "fs";
 import path from "path";
 import type { BigIntStats } from "fs";
+import { decodeWorkspaceText } from "../util/workspace-text";
 
 export const hashText = (t: string) => createHash("sha256").update(t).digest("hex");
+export const hashBytes = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 export const fileVersion = (stat: BigIntStats) =>
   [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":");
 export const agentDir = (root: string) => path.join(root, ".localcoder", "agent");
 
 /** Content-addressed pre-edit backups: the "before" side of the undo journal. Never garbage-collected (documented limitation). */
-export function storeBackup(root: string, content: string): string {
-  const h = hashText(content);
+export function storeBackup(root: string, content: string | Buffer): string {
+  const h = Buffer.isBuffer(content) ? hashBytes(content) : hashText(content);
   const dir = path.join(agentDir(root), "backups");
   mkdirSync(dir, { recursive: true });
   const f = path.join(dir, h);
@@ -23,11 +25,11 @@ export function storeBackup(root: string, content: string): string {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
     } finally { unlinkSync(temp); }
   }
-  loadBackup(root, h);
+  loadBackupBytes(root, h);
   return h;
 }
 
-export function loadBackup(root: string, ref: string): string {
+export function loadBackupBytes(root: string, ref: string): Buffer {
   if (!/^[a-f0-9]{64}$/.test(ref)) throw new Error("invalid backup reference");
   const file = path.join(agentDir(root), "backups", ref);
   const stat = lstatSync(file, { bigint: true });
@@ -36,10 +38,12 @@ export function loadBackup(root: string, ref: string): string {
   try {
     if (fileVersion(fstatSync(fd, { bigint: true })) !== fileVersion(stat)) throw new Error("Backup changed before it could be read.");
     const bytes = readFileSync(fd);
-    if (createHash("sha256").update(bytes).digest("hex") !== ref) throw new Error("Backup content does not match its recorded hash.");
-    return bytes.toString("utf8");
+    if (hashBytes(bytes) !== ref) throw new Error("Backup content does not match its recorded hash.");
+    return bytes;
   } finally { closeSync(fd); }
 }
+
+export const loadBackup = (root: string, ref: string): string => decodeWorkspaceText(loadBackupBytes(root, ref)).text;
 
 /** Full command output kept on disk (already secret-redacted, capped) so tool results can carry a short reference instead of raw text. */
 export function storeOutput(root: string, text: string): string {
@@ -52,7 +56,7 @@ export function storeOutput(root: string, text: string): string {
   return h;
 }
 
-export function writeAtomic(abs: string, content: string, restoreMode?: number): void {
+export function writeAtomic(abs: string, content: string | Buffer, restoreMode?: number): void {
   mkdirSync(path.dirname(abs), { recursive: true });
   const tmp = `${abs}.lc-tmp-${randomBytes(16).toString("hex")}`;
   let mode = restoreMode;

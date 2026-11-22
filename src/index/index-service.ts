@@ -9,8 +9,9 @@ import { IgnoreRules } from "./ignore";
 import { FsWatcher } from "./watcher";
 import { resolveWithinRoot } from "./workspace-jail";
 import type { MemoryStore } from "../memory/memory-store";
+import { decodeWorkspaceText, matchLineEndings } from "../util/workspace-text";
 
-function hashContent(content: string): string {
+function hashContent(content: Buffer): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
@@ -111,17 +112,21 @@ export class IndexService {
     if (!stat.isFile()) return null;
 
     let content: string;
+    let content_hash: string;
     try {
-      content = readFileSync(resolved, "utf8");
+      const bytes = readFileSync(resolved);
+      content = matchLineEndings(decodeWorkspaceText(bytes).text, "\n");
+      content_hash = hashContent(bytes);
     } catch {
-      return null; // binary/unreadable file — not indexed, not a crash
+      await this.store.removeFile(relativePath);
+      this.memory?.markStaleByFile(relativePath);
+      return null;
     }
 
-    const content_hash = hashContent(content);
     const existing = await this.store.getFile(relativePath);
     const language = detectLanguage(relativePath);
 
-    if (existing && existing.content_hash === content_hash) {
+    if (existing && existing.content_hash === content_hash && existing.content === content) {
       return { symbols: (await this.store.getSymbols(relativePath)).length, language, changed: false }; // unchanged — skip re-parse entirely
     }
 

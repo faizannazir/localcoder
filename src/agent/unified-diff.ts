@@ -77,11 +77,10 @@ export type PatchResult = { ok: true; content: string } | { ok: false; error: st
  * matches are refused rather than guessed.
  */
 export function applyUnifiedPatch(original: string, patch: string): PatchResult {
-  const crlf = original.includes("\r\n");
-  const eol = crlf ? "\r\n" : "\n";
+  const eol = original.match(/\r\n|\n|\r/)?.[0] ?? "\n";
   const fileLines = original.split(eol);
 
-  const raw = patch.replace(/\r\n/g, "\n").split("\n");
+  const raw = patch.split(/\r\n|\n|\r/);
   if (raw.length && raw[raw.length - 1] === "") raw.pop();
   const hunks: { hint: number; old: string[]; neu: string[] }[] = [];
   let cur: { hint: number; old: string[]; neu: string[] } | null = null;

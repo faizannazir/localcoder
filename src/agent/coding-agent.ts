@@ -13,7 +13,8 @@ import { AgentState, AgentStateStore, ProposedEdit, ReviewResult, isTerminal, ne
 import { BudgetError, PromptSection, fitPrompt } from "./prompt";
 import { extractJson } from "./json-extract";
 import { diffStats, unifiedDiff } from "./unified-diff";
-import { fileVersion, hashText, loadBackup, writeAtomic } from "./workdir";
+import { fileVersion, hashBytes, loadBackup, loadBackupBytes, writeAtomic } from "./workdir";
+import { decodeWorkspaceText, matchLineEndings } from "../util/workspace-text";
 import { AgentConfig, ModelRole, parseAgentModels } from "./config";
 import type { AgentModelWorkflow, RoleModel } from "./model-workflow";
 import { EstimatingTokenCounter } from "../context/token-counter";
@@ -560,7 +561,7 @@ export class CodingAgent implements ICodingAgent {
 
   private readWhole(p: string): string {
     const c = this.sandbox.resolve(p, false);
-    return c.ok && existsSync(c.abs) ? readFileSync(c.abs, "utf8") : "";
+    return c.ok && existsSync(c.abs) ? decodeWorkspaceText(readFileSync(c.abs)).text : "";
   }
 
   private originalOf(p: string): string {
@@ -579,7 +580,7 @@ export class CodingAgent implements ICodingAgent {
     const focusPaths = [...changed, ...mentioned];
     const views = yield* this.loadFocus(focusPaths);
     const omitted = Object.entries(this.state.files_read).filter(([p]) => !focusPaths.includes(p)).map(([p, h]) => `- ${p} (unchanged since read, hash ${h.slice(0, 8)}; omitted)`).join("\n");
-    const diff = changed.map((p) => unifiedDiff(this.originalOf(p), this.readWhole(p), p)).join("\n");
+    const diff = this.finalDiff(changed);
     const sections: PromptSection[] = [
       { id: "goal", text: this.state.goal, priority: 100, required: true },
       { id: "validation_failure", text: failure, priority: 95, shrinkable: true },
@@ -682,14 +683,15 @@ export class CodingAgent implements ICodingAgent {
     const deleted = this.deletedPaths();
     return files.map((p) => {
       const original = this.originalOf(p);
-      if (!deleted.has(p)) return unifiedDiff(original, this.readWhole(p), p);
+      const normalized = matchLineEndings(original, "\n");
+      if (!deleted.has(p)) return unifiedDiff(normalized, matchLineEndings(this.readWhole(p), "\n"), p);
       const target = this.sandbox.resolve(p, false);
-      if (!target.ok || existsSync(target.abs)) return unifiedDiff(original, this.readWhole(p), p);
+      if (!target.ok || existsSync(target.abs)) return unifiedDiff(normalized, matchLineEndings(this.readWhole(p), "\n"), p);
       const header = `--- a/${p}\n+++ /dev/null\n`;
-      if (original === "") return header;
-      const lines = original.replace(/\n$/, "").split("\n");
+      if (normalized === "") return header;
+      const lines = normalized.replace(/\n$/, "").split("\n");
       return header + `@@ -1,${lines.length} +0,0 @@\n` + lines.map((line) => `-${line}\n`).join("") +
-        (original.endsWith("\n") ? "" : "\\ No newline at end of file\n");
+        (normalized.endsWith("\n") ? "" : "\\ No newline at end of file\n");
     }).filter(Boolean).join("\n");
   }
 
@@ -741,8 +743,8 @@ export class CodingAgent implements ICodingAgent {
       if (!c.ok) { res.conflicts.push({ path: e.path, reason: c.reason }); blocked.add(e.path); continue; }
       try {
         if (e.op === "delete") deletionPath(this.sandbox, e.path);
-        const cur = existsSync(c.abs) && statSync(c.abs).isFile() ? readFileSync(c.abs, "utf8") : null;
-        const currentHash = cur === null ? null : hashText(cur);
+        const cur = existsSync(c.abs) && statSync(c.abs).isFile() ? readFileSync(c.abs) : null;
+        const currentHash = cur === null ? null : hashBytes(cur);
         const alreadyRestored = (e.undo_status === "pending" || e.op === "delete") && currentHash === e.before_hash;
         const alreadyDeleted = cur === null && e.before_hash === null;
         if (!opts.force && !alreadyRestored && !alreadyDeleted && currentHash !== e.after_hash) {
@@ -757,7 +759,7 @@ export class CodingAgent implements ICodingAgent {
           if (!res.deleted.includes(e.path)) res.deleted.push(e.path);
           await this.d.indexService?.handleEvent({ type: "deleted", path: e.path });
         } else {
-          if (!alreadyRestored) writeAtomic(c.abs, loadBackup(this.d.root, e.backup_ref), e.before_mode);
+          if (!alreadyRestored) writeAtomic(c.abs, loadBackupBytes(this.d.root, e.backup_ref), e.before_mode);
           if (!res.restored.includes(e.path)) res.restored.push(e.path);
           await this.d.indexService?.handleEvent({ type: "modified", path: e.path });
         }

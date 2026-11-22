@@ -38,7 +38,9 @@ localcoder files delete drafts/obsolete.txt
 localcoder undo <task_id>
 ```
 
-Deletion supports regular UTF-8 workspace files up to 512 KB. LocalCoder keeps a backup for undo, refuses protected paths and symlinks, and checks for conflicts before overwriting a file recreated after deletion.
+LocalCoder preserves UTF-8 with or without a BOM, UTF-16 little- and big-endian with a BOM, and existing line endings. With mixed line endings, use an exact replacement that preserves those breaks. New files use UTF-8. LocalCoder refuses unknown encodings and checks the raw bytes for conflicts, including encoding-only changes. Agent diffs are decoded text previews. Undo restores the original bytes.
+
+Deletion supports regular text files up to 512 KB. LocalCoder keeps a byte-for-byte backup for undo, refuses protected paths and symlinks, and checks for conflicts before overwriting a file recreated after deletion.
 
 With the server running, `localcoder run <id> "<prompt>"` sends a chat request from the terminal. Use `models load <id>` to warm a model, `models ps` to see what is in memory, and `models unload <id>` to release it after active requests finish. Unloading leaves the weights on disk. Pass `--port <port>` when the server uses a different port.
 

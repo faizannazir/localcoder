@@ -7,11 +7,17 @@ import { Sandbox, redactSecrets } from "./sandbox";
 import { runCommand } from "./command-runner";
 import type { AgentConfig } from "./config";
 import { applyUnifiedPatch, unifiedDiff, diffStats } from "./unified-diff";
-import { fileVersion, hashText, storeBackup, storeOutput, writeAtomic } from "./workdir";
+import { fileVersion, hashBytes, storeBackup, storeOutput, writeAtomic } from "./workdir";
+import { decodeWorkspaceText, encodeWorkspaceText, lineEndings, matchLineEndings } from "../util/workspace-text";
 
 const READ_LIMIT_BYTES = 16_000;
 const MAX_WRITE_BYTES = 512 * 1024;
 const MAX_READ_FILE = 2_000_000;
+
+function readSource(abs: string) {
+  const bytes = readFileSync(abs);
+  return { ...decodeWorkspaceText(bytes), bytes };
+}
 
 export interface ToolRuntimeOptions {
   root: string;
@@ -107,30 +113,43 @@ export class DefaultToolRuntime implements ToolRuntime {
     const stat = statSync(c.abs, { bigint: true, throwIfNoEntry: false });
     if (!stat?.isFile()) return fail("file not found");
     if (stat.size > MAX_READ_FILE) return fail("file too large to read (>2MB)");
-    const content = readFileSync(c.abs, "utf8");
-    if (content.includes("\0")) return fail("binary file");
-    const lines = content.split("\n");
+    const file = readSource(c.abs);
+    const lines = file.text.split(/\r\n|\n|\r/);
+    const endings = lineEndings(file.text);
     const total = lines.length;
     const start = Math.min(total, Math.max(1, Math.floor(Number(args.start_line)) || 1));
     const end = Math.min(total, Math.max(start, Math.floor(Number(args.end_line)) || total));
     const out: string[] = [];
     let bytes = 0, last = start - 1;
+    let clippedLine = false;
     for (let i = start - 1; i < end; i++) {
-      const b = Buffer.byteLength(lines[i]) + 1;
-      if (bytes + b > READ_LIMIT_BYTES && out.length > 0) break;
-      out.push(lines[i]); bytes += b; last = i + 1;
+      const part = (out.length ? endings[i - 1] : "") + lines[i];
+      const size = Buffer.byteLength(part);
+      if (bytes + size > READ_LIMIT_BYTES) {
+        if (out.length === 0) {
+          const buffer = Buffer.from(part);
+          let cut = READ_LIMIT_BYTES;
+          while ((buffer[cut] & 0xc0) === 0x80) cut--; // Keep the final code point whole.
+          out.push(buffer.subarray(0, cut).toString("utf8"));
+          last = i + 1;
+          clippedLine = true;
+        }
+        break;
+      }
+      out.push(part); bytes += size; last = i + 1;
     }
-    const partial = !(start === 1 && last === total);
-    return ok({ path: c.rel, start_line: start, end_line: last, total_lines: total, content: out.join("\n"), hash: hashText(content), version: fileVersion(stat), partial }, partial);
+    const partial = clippedLine || start !== 1 || last !== total;
+    return ok({ path: c.rel, start_line: start, end_line: last, total_lines: total, content: out.join(""), hash: hashBytes(file.bytes), version: fileVersion(stat), partial }, partial);
   }
 
-  private async commit(rel: string, abs: string, before: string | null, after: string, mode: string): Promise<ToolResult> {
-    if (Buffer.byteLength(after) > MAX_WRITE_BYTES) return fail("resulting file exceeds the 512KB write limit");
-    const backup_ref = before === null ? null : storeBackup(this.o.root, before);
-    writeAtomic(abs, after);
+  private async commit(rel: string, abs: string, before: ReturnType<typeof readSource> | null, after: string, mode: string): Promise<ToolResult> {
+    const encoded = encodeWorkspaceText(after, before ?? undefined);
+    if (encoded.length > MAX_WRITE_BYTES) return fail("resulting file exceeds the 512KB write limit");
+    const backup_ref = before === null ? null : storeBackup(this.o.root, before.bytes);
+    writeAtomic(abs, encoded);
     const warning = await this.refreshAfterMutation(rel, before === null ? "created" : "modified");
-    const stats = diffStats(unifiedDiff(before ?? "", after, rel));
-    return ok({ path: rel, mode, before_hash: before === null ? null : hashText(before), after_hash: hashText(after), backup_ref, lines_added: stats.added, lines_removed: stats.removed, ...(warning ? { warning } : {}) });
+    const stats = diffStats(unifiedDiff(matchLineEndings(before?.text ?? "", "\n"), matchLineEndings(after, "\n"), rel));
+    return ok({ path: rel, mode, before_hash: before === null ? null : hashBytes(before.bytes), after_hash: hashBytes(encoded), backup_ref, lines_added: stats.added, lines_removed: stats.removed, ...(warning ? { warning } : {}) });
   }
 
   private async refreshAfterMutation(rel: string, type: "created" | "modified"): Promise<string | undefined> {
@@ -145,32 +164,40 @@ export class DefaultToolRuntime implements ToolRuntime {
     const exists = existsSync(c.abs);
     if (exists && !statSync(c.abs).isFile()) return fail("path is not a regular file");
     if (exists && args.allow_overwrite !== true) return fail("file already exists: use apply_patch for targeted edits (full-file overwrite is the last resort)");
-    const before = exists ? readFileSync(c.abs, "utf8") : null;
-    if (before === content) return fail("write would not change the file");
-    return this.commit(c.rel, c.abs, before, content, exists ? "overwrite" : "create");
+    const before = exists ? readSource(c.abs) : null;
+    if (before?.lineEnding === null) return fail("Whole-file overwrite refused for mixed line endings. Use a targeted replacement.");
+    const next = matchLineEndings(content, before?.lineEnding);
+    if (before?.text === next) return fail("write would not change the file");
+    return this.commit(c.rel, c.abs, before, next, exists ? "overwrite" : "create");
   }
 
   private async applyPatch(args: Record<string, unknown>): Promise<ToolResult> {
     const c = this.sb.resolve(args.path, true);
     if (!c.ok) return fail(c.reason);
     if (!existsSync(c.abs) || !statSync(c.abs).isFile()) return fail("file does not exist (use write_file to create a new file)");
-    const cur = readFileSync(c.abs, "utf8");
-    if (typeof args.expected_hash === "string" && hashText(cur) !== args.expected_hash) return fail("file changed on disk since it was read; re-read it before editing");
+    const before = readSource(c.abs);
+    const cur = before.text;
+    if (typeof args.expected_hash === "string" && hashBytes(before.bytes) !== args.expected_hash) return fail("file changed on disk since it was read; re-read it before editing");
     let next: string, mode: string;
     if (typeof args.patch === "string") {
+      if (before.lineEnding === null) return fail("Patch refused for mixed line endings. Use an exact targeted replacement.");
       const r = applyUnifiedPatch(cur, args.patch);
       if (!r.ok) return fail(r.error);
       next = r.content; mode = "patch";
     } else if (typeof args.old_text === "string" && typeof args.new_text === "string") {
       if (args.old_text === "") return fail("old_text must not be empty");
-      const n = cur.split(args.old_text).length - 1;
+      const old = matchLineEndings(args.old_text, before.lineEnding);
+      const replacement = matchLineEndings(args.new_text, before.lineEnding);
+      const n = cur.split(old).length - 1;
       if (n === 0) return fail("old_text was not found in the file");
       if (n > 1) return fail(`old_text matches ${n} places; include more surrounding lines so it matches exactly once`);
-      const nt = args.new_text;
-      next = cur.replace(args.old_text, () => nt); mode = "replace";
+      next = cur.replace(old, () => replacement); mode = "replace";
+      if (before.lineEnding === null && lineEndings(cur).join("|") !== lineEndings(next).join("|")) {
+        return fail("Replacement must keep the line breaks in a file with mixed line endings.");
+      }
     } else return fail("provide either patch, or old_text and new_text");
     if (next === cur) return fail("edit produces no change");
-    return this.commit(c.rel, c.abs, cur, next, mode);
+    return this.commit(c.rel, c.abs, before, next, mode);
   }
 
   // --- repository queries ---------------------------------------------------
@@ -270,12 +297,24 @@ export class DefaultToolRuntime implements ToolRuntime {
     if ("ok" in t) return t;
     const c = this.sb.resolve(t.rel, true);
     if (!c.ok) return fail(c.reason);
-    const before = readFileSync(c.abs, "utf8");
-    const backup_ref = storeBackup(this.o.root, before);
+    const before = readSource(c.abs);
+    if (before.lineEnding === null) return fail("Formatter refused for mixed line endings.");
+    const mode = statSync(c.abs).mode;
+    const backup_ref = storeBackup(this.o.root, before.bytes);
     const res = await this.exec(fill(this.o.config.format_target, t.rel));
-    const after = readFileSync(c.abs, "utf8");
-    if (after !== before) {
-      (res.data as any).edit = { path: c.rel, before_hash: hashText(before), after_hash: hashText(after), backup_ref };
+    const target = this.sb.resolve(t.rel, true);
+    if (!target.ok || target.abs !== c.abs) return fail("Formatter changed the target path.");
+    let after: Buffer;
+    try {
+      const formatted = readSource(c.abs);
+      after = encodeWorkspaceText(matchLineEndings(formatted.text, before.lineEnding), before);
+      if (!formatted.bytes.equals(after)) writeAtomic(c.abs, after, mode);
+    } catch {
+      writeAtomic(c.abs, before.bytes, mode);
+      return fail("Formatter output was unreadable or invalid. Restored the original file.");
+    }
+    if (!after.equals(before.bytes)) {
+      (res.data as any).edit = { path: c.rel, before_hash: hashBytes(before.bytes), after_hash: hashBytes(after), backup_ref };
       const warning = await this.refreshAfterMutation(c.rel, "modified");
       if (warning) (res.data as any).warning = warning;
     }
