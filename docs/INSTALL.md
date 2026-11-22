@@ -18,6 +18,8 @@ bash scripts/setup-macos.sh
 
 This downloads the pinned llama.cpp engine and Qwen2.5-Coder 1.5B GGUF (about 1.14 GB combined), checks the download hashes, installs locked npm dependencies, builds the CLI, and runs `doctor`. Rerunning it reuses the engine and verifies the existing model file. Save the printed engine export when running LocalCoder from a different project. `doctor` reports the current memory budget, which can change as other apps use RAM.
 
+To put the command on your terminal's `PATH`, run `bash scripts/setup-macos.sh --link` from the checkout. Then run `localcoder doctor`, `localcoder models list`, or `localcoder serve --port 8080` from any project. The link uses npm's global bin directory and points to this checkout. Keep the checkout in place and rerun setup after moving it. Unlink with `npm uninstall -g localcoder`.
+
 ## Manual install and build
 
 From the repository root:

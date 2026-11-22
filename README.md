@@ -28,6 +28,8 @@ node dist/cli/index.js --help
 node dist/cli/index.js doctor
 ```
 
+Run `bash scripts/setup-macos.sh --link` from the checkout to use `localcoder` directly from any project directory. Then run `localcoder doctor` to check the engine and current memory budget.
+
 The `doctor` command reports the hardware profile, resource policy, and model routing decisions. LocalCoder calculates a conservative memory budget before loading a model. On macOS, the available-memory estimate includes reclaimable file cache. Requests receive an HTTP `503` when every candidate exceeds the budget.
 
 Real inference requires a compatible GGUF model and the platform-specific llama-server binary. Extract the full llama.cpp release archive so its companion libraries remain beside the executable. Register a downloaded model, then start the server.

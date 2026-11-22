@@ -12,6 +12,7 @@ const TSX = pathToFileURL(require.resolve("tsx")).href;
 function run(args: string[], cwd: string) {
   const env = { ...process.env };
   delete env.LOCALCODER_LLAMA_SERVER_BIN;
+  env.LOCALCODER_HOME = path.join(cwd, ".localcoder");
   env.PATH = [path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter); // hermetic: no llama-server on PATH
   return spawnSync(process.execPath, ["--import", TSX, CLI, ...args], { cwd, env, encoding: "utf8", timeout: 30_000 });
 }

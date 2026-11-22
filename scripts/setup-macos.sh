@@ -3,6 +3,11 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+if [[ $# -gt 1 || ($# -eq 1 && "$1" != --link) ]]; then
+  echo "Usage: bash scripts/setup-macos.sh [--link]" >&2
+  exit 1
+fi
+
 if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
   echo "This installer supports Apple Silicon Macs. See docs/SETUP-WINDOWS-LINUX-MAC.md." >&2
   exit 1
@@ -52,4 +57,19 @@ fi
 npm ci
 npm run build
 LOCALCODER_LLAMA_SERVER_BIN="$PWD/$engine" node dist/cli/index.js doctor
-printf '\nTo use the engine from any project, run:\nexport LOCALCODER_LLAMA_SERVER_BIN=%q\n' "$PWD/$engine"
+if [[ ${1:-} == --link ]]; then
+  npm link --offline
+  node - "$PWD/$engine" <<'NODE'
+const { mkdirSync, writeFileSync } = require("node:fs");
+const path = require("node:path");
+const { userEngineDir, installedEnginePath } = require("./dist/util/paths");
+const dir = userEngineDir();
+if (!installedEnginePath()) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, "current.json"), JSON.stringify({ binary: process.argv[2] }) + "\n", { mode: 0o600 });
+}
+NODE
+  printf '\nRun localcoder doctor from any project. If the command is missing, add %s/bin to PATH.\n' "$(npm prefix -g)"
+else
+  printf '\nTo use the engine from any project, run:\nexport LOCALCODER_LLAMA_SERVER_BIN=%q\n' "$PWD/$engine"
+fi
