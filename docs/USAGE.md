@@ -56,15 +56,69 @@ If the memory-safety gate rejects every candidate model, you'll get a clean `503
 }
 ```
 
-## Connecting an IDE / existing agent tool
+## Using LocalCoder from an IDE
 
-Because the API is OpenAI-compatible, tools like **Continue**, **Aider**, **Cline**, and **OpenCode** need configuration, not custom code — point their "custom OpenAI-compatible endpoint" setting at:
+The tested integration is the CLI in an IDE terminal, plus the native `/v1/agent/run` HTTP/SSE endpoint. There is no dedicated LocalCoder VS Code extension yet. Run from the project you want to edit:
 
+```bash
+export LOCALCODER_ROOT=/absolute/path/to/localcoder
+export LOCALCODER_CLI="$LOCALCODER_ROOT/dist/cli/index.js"
+export LOCALCODER_LLAMA_SERVER_BIN="$LOCALCODER_ROOT/engine/llama-server"
+node "$LOCALCODER_CLI" models add "$LOCALCODER_ROOT/models/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf"
+cd /absolute/path/to/your-project
+node "$LOCALCODER_CLI" doctor
+node "$LOCALCODER_CLI" agent "Fix the failing tests"
 ```
-http://127.0.0.1:8080/v1
+
+The model registration command is a one-time step. Check `models` for the exact ID. To use the three-role workflow, set the following in that project's `.localcoder/agent.json`, preserving any configured test commands:
+
+```json
+{
+  "models": {
+    "planner": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+    "coder": "qwen2.5-coder-1.5b-instruct-q4-k-m",
+    "reviewer": "qwen2.5-coder-1.5b-instruct-q4-k-m"
+  }
+}
 ```
 
-Set the client API key to `LOCALCODER_API_TOKEN` when bearer authentication is enabled.
+This 1.5B assignment completed the recorded small CLI/API tasks. The mixed 0.5B assignments did not; see [trained-model results](VERIFICATION.md#trained-models-verified-on-2026-11-22). Without a role map the agent uses automatic single-model selection.
+
+For a chat client, start the server from the target project:
+
+```bash
+node "$LOCALCODER_CLI" serve --port 8080
+```
+
+A Continue chat configuration can follow its [official OpenAI-provider configuration](https://docs.continue.dev/customize/model-providers/top-level/openai):
+
+```yaml
+name: LocalCoder chat
+version: 1.0.0
+schema: v1
+models:
+  - name: LocalCoder automatic routing
+    provider: openai
+    model: localcoder-auto
+    apiBase: http://127.0.0.1:8080/v1
+    apiKey: local
+    roles: [chat]
+    useResponsesApi: false
+    useLegacyCompletionsEndpoint: false
+    defaultCompletionOptions:
+      maxTokens: 512
+```
+
+This is a configuration example, not an end-to-end tested extension integration. Use Chat mode. If server authentication is enabled, replace the dummy client key with your `LOCALCODER_API_TOKEN`; keep real keys out of shared configuration.
+
+The compatibility boundaries matter:
+
+- Chat supports streaming string messages with system/user/assistant roles. It does not implement native tool-call messages, image content, `/v1/responses`, or non-streaming chat responses.
+- The chat API currently routes automatically and does not honor the client's `model` value as a pin. `localcoder-auto` describes that behavior; configure explicit agent roles for controlled workflow assignments.
+- `/v1/completions` takes `prefix` and optional `suffix`, rather than a standard OpenAI `prompt` body. An autocomplete client needs the appropriate adapter.
+- Chat requests do not invoke LocalCoder's plan/code/review loop. An IDE agent integration must call `/v1/agent/run` and handle its events, diffs, validation, resume, and undo.
+
+Cline, Aider, OpenCode, Continue Agent mode, and other integrations should not be advertised as plug-and-play until their actual request formats and workflows are tested. Continue [documents tool-use capability as required for Agent mode](https://docs.continue.dev/customize/deep-dives/model-capabilities).
 
 ## Runtime behavior
 
@@ -110,7 +164,7 @@ localcoder agent "..." --session my-session         # tasks in a session share a
 localcoder undo [task_id] [--force]                 # revert the agent's edits (refuses if you changed the files since)
 ```
 
-HTTP: `POST /v1/agent/run {"task": "...", "session_id"?, "resume_task_id"?}` streams SSE events `plan`, `tool_call`, `tool_result`, `observation`, `diff`, `done` (or `error`). `POST /v1/agent/undo {"task_id"?, "force"?}` reverts. A 503 means the hardware/memory policy refused the run before any work started; 409 means a run is already active for that repository.
+HTTP: `POST /v1/agent/run {"task": "...", "session_id"?, "resume_task_id"?}` streams SSE events `model` (configured workflow), `plan`, `tool_call`, `tool_result`, `observation`, `diff`, `done` (or `error`). `POST /v1/agent/undo {"task_id"?, "force"?}` reverts. A 503 means the hardware/memory policy refused the run before any work started; 409 means a run is already active for that repository.
 
 **Telling the agent how to test.** It never runs commands you or the model type. It runs only what is configured: `scripts.test/lint/build` in `package.json` (auto-detected), or `.localcoder/agent.json`:
 
