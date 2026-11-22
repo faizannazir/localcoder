@@ -43,6 +43,10 @@ Registered models are recorded in `~/.localcoder/models.local.json`. Set `LOCALC
 
 For Windows commands, engine downloads, and model sizing, follow the setup and model guides. [Platform setup](docs/SETUP-WINDOWS-LINUX-MAC.md) · [Installation](docs/INSTALL.md) · [Models](docs/MODELS.md)
 
+## Try a real coding task
+
+After the Apple Silicon setup, run `node scripts/demo.cjs` from the checkout. The demo repairs a bug using a trained model, reruns the original test, and checks that undo restores the disposable workspace. [Demo instructions](docs/DEMO.md)
+
 ## Run with the mock backend
 
 The mock backend returns responses labeled `[mock:...]` and exercises request routing and streaming without downloading an engine or model. It uses the same resource-policy gate.
