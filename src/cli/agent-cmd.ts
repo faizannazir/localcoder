@@ -28,7 +28,7 @@ export async function runAgent(args: string[]): Promise<void> {
   const root = process.cwd();
   const deletePath = file ? deletionPath(new Sandbox(root, new IgnoreRules(root)), file).rel : undefined;
   if (deletePath) checkDeletionStorage(root);
-  const ctx = buildContext({ backend: flag(args, "--backend") as "llama" | "mock" | undefined });
+  const ctx = buildContext({ backend: flag(args, "--backend") as "llama" | "mock" | undefined, openWorkspaceIndex: false });
   let prepared;
   try { prepared = await prepareAgentRun(ctx.repoRoot, { task, session_id: flag(args, "--session"), resume_task_id: flag(args, "--resume") }, ctx, modelId); }
   catch (error) { console.error(`localcoder: ${(error as Error).message}`); process.exitCode = 1; return; }
@@ -66,9 +66,11 @@ export async function runAgent(args: string[]): Promise<void> {
     console.error(`localcoder: ${(e as Error).message}`);
     process.exitCode = 1;
   } finally {
-    session?.close();
-    unlockRepo(ctx.repoRoot);
-    await ctx.modelManager.unload(pre.decision.model_id).catch(() => {});
+    try { session?.close(); }
+    finally {
+      unlockRepo(ctx.repoRoot);
+      await ctx.modelManager.unload(pre.decision.model_id).catch(() => {});
+    }
   }
 }
 

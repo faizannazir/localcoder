@@ -26,6 +26,7 @@ export interface ServeOptions {
   baseDir?: string;
   backend?: "llama" | "mock";
   repoRoot?: string;
+  openWorkspaceIndex?: boolean;
   control?: ServerControl;
   /** Test seam: supply a specific InferenceBackend (e.g. a scripted one in unit tests). */
   backendFactory?: () => import("../types/index").InferenceBackend;
@@ -86,7 +87,7 @@ export function buildContext(opts: ServeOptions = {}): AppContext {
   const backendFactory = opts.backendFactory ?? (() => (backendChoice === "mock" ? new MockInferenceBackend() : new LlamaCppBackend()));
 
   const repoRoot = opts.repoRoot ?? process.cwd();
-  const hasIndex = existsSync(indexDbPath(repoRoot));
+  const hasIndex = opts.openWorkspaceIndex !== false && existsSync(indexDbPath(repoRoot));
   const indexStore = hasIndex ? openIndexStore(repoRoot) : undefined;
   const contextManager = indexStore ? new DefaultContextManager(indexStore, new EstimatingTokenCounter()) : undefined;
 
@@ -165,10 +166,15 @@ export async function serve(opts: ServeOptions = {}): Promise<{ port: number; cl
   const server = createServer(ctx, securityFromEnv(), opts.control);
   const port = opts.port ?? 8080;
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
+    });
+  } catch (error) {
+    ctx.indexStore?.close();
+    throw error;
+  }
 
   return {
     port: (server.address() as import("net").AddressInfo).port,

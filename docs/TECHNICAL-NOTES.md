@@ -212,3 +212,9 @@ After a successful file mutation, an index refresh error must not turn the resul
 A syntactically valid JSON response does not establish a usable coding result. Native Qwen trials copied the example path `file` while correctly diagnosing a subtraction bug. Descriptive field contracts removed that example-value failure in paired 1.5B probes and real CLI/API tasks. Keep semantic model runs alongside deterministic orchestration tests when changing prompts; do not substitute tests that only check prompt wording.
 
 Generation can terminate normally without visible text. Verification records terminal events separately from usable output, and measures text chunks without presenting them as generated tokens.
+
+## Repository search and file identity
+
+In a dense text search, building a snippet for each match spent most of the time re-splitting the same file. Split each indexed file once and build snippets only for matches admitted to the bounded result set. On an M1 Pro with Node 25.9, an in-memory index of ten 1,500-line fixtures with a match on every line returned the top eight in about 8 ms median over three warm runs, down from about 550 ms. This measures local search without model inference.
+
+The agent validates a cached file view against device, inode, size, modification time, and change time before reusing it. Edit and undo conflicts use content hashes over the original bytes. The index and prompts can normalize line breaks for display while the mutation layer preserves the file's encoding and line endings.

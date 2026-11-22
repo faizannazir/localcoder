@@ -35,8 +35,14 @@ export async function openAgentSession(opts: {
 }): Promise<AgentSession> {
   const db = indexDbPath(opts.root);
   const index = new SqliteIndexStore(db);
-  const memory = new MemoryStore(db);
+  let closeMemory: (() => void) | undefined;
+  const close = () => {
+    try { index.close(); }
+    finally { closeMemory?.(); }
+  };
   try {
+    const memory = new MemoryStore(db);
+    closeMemory = () => memory.close();
     const indexService = new IndexService(opts.root, index, memory);
     let indexedNow = false;
     if (opts.indexIfEmpty !== false && (await index.stats()).files === 0) { await indexService.indexAll(); indexedNow = true; }
@@ -47,6 +53,6 @@ export async function openAgentSession(opts: {
       backend: opts.backend, modelWorkflow: opts.modelWorkflow, tokenCounter: new FallbackTokenCounter(opts.backend),
       policy: opts.policy, decision: opts.decision, stateStore: new AgentStateStore(opts.root), config, aborted: opts.aborted, signal: opts.signal, deletePath: opts.deletePath,
     });
-    return { agent, indexedNow, close: () => { index.close(); memory.close(); } };
-  } catch (error) { index.close(); memory.close(); throw error; }
+    return { agent, indexedNow, close };
+  } catch (error) { close(); throw error; }
 }
