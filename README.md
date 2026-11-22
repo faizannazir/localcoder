@@ -30,6 +30,8 @@ node dist/cli/index.js doctor
 
 Run `bash scripts/setup-macos.sh --link` from the checkout to use `localcoder` directly from any project directory. Then run `localcoder doctor` to check the engine and current memory budget.
 
+After linking, use `localcoder models list --downloaded` to find an installed model. Run `localcoder start` from your project to start the API in the background, `localcoder run <id> "<prompt>"` to prompt a model, and `localcoder stop` when finished. [Terminal commands and IDE setup](docs/USAGE.md)
+
 The `doctor` command reports the hardware profile, resource policy, and model routing decisions. LocalCoder calculates a conservative memory budget before loading a model. On macOS, the available-memory estimate includes reclaimable file cache. Requests receive an HTTP `503` when every candidate exceeds the budget.
 
 Real inference requires a compatible GGUF model and the platform-specific llama-server binary. Extract the full llama.cpp release archive so its companion libraries remain beside the executable. Register a downloaded model, then start the server.
@@ -63,7 +65,7 @@ node dist/cli/index.js serve --backend mock --port 8080
 | --- | --- | --- |
 | GET | `/v1/models` | Model registry, installation status, and residency |
 | GET | `/v1/resource` | Hardware profile, resource policy, and available repository statistics |
-| POST | `/v1/chat/completions` | Stream chat responses |
+| POST | `/v1/chat/completions` | Generate a chat response as JSON or a stream |
 | POST | `/v1/completions` | Stream fill-in-middle completions from `prefix` and `suffix` |
 | POST | `/v1/agent/run` | Run or resume a coding task and stream its events |
 | POST | `/v1/agent/undo` | Undo edits from a saved task |

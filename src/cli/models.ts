@@ -3,7 +3,7 @@ import path from "path";
 import { loadFullRegistry, isDownloaded } from "../router/registry";
 import { userDataDir, userModelsDir } from "../util/paths";
 import { downloadModel, modelDownloads } from "../router/model-download";
-import { parseServerPort, serverRequest } from "./server-client";
+import { serverPort, serverRequest } from "./server-client";
 import { entryFromGguf, readGgufMeta, summarizeGguf } from "../inference/gguf";
 import type { ModelRegistryEntry } from "../types/index";
 
@@ -37,7 +37,7 @@ export async function runModels(args: string[] = []): Promise<void> {
       throw new Error("Usage: localcoder models ps [--port <port>]");
     }
     const { data } = await serverRequest<{ data: { id: string; resident: boolean }[] }>(
-      model ? parseServerPort(portFlag) : 8080, "/v1/models");
+      await serverPort(portFlag), "/v1/models");
     const loaded = data.filter((entry) => entry.resident).map((entry) => entry.id);
     console.log(loaded.length ? loaded.join("\n") : "No models loaded.");
     return;
@@ -46,7 +46,7 @@ export async function runModels(args: string[] = []): Promise<void> {
     if (!model || (args.length !== 2 && (args.length !== 4 || portFlag !== "--port"))) {
       throw new Error(`Usage: localcoder models ${operation} <id> [--port <port>]`);
     }
-    await serverRequest(portFlag ? parseServerPort(portValue) : 8080, `/v1/models/${operation}`, { model });
+    await serverRequest(await serverPort(portValue), `/v1/models/${operation}`, { model });
     console.log(`${operation === "load" ? "Loaded" : "Unloaded"} ${model}`);
     return;
   }

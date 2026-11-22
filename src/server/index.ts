@@ -19,12 +19,14 @@ import { handleResource } from "./routes/resource";
 import { handleChatCompletions } from "./routes/chat";
 import { handleCompletions } from "./routes/completions";
 import { handleAgentRun, handleAgentUndo } from "./routes/agent";
+import { CONTROL_ROUTE, handleServerControl, type ServerControl } from "./control";
 
 export interface ServeOptions {
   port?: number;
   baseDir?: string;
   backend?: "llama" | "mock";
   repoRoot?: string;
+  control?: ServerControl;
   /** Test seam: supply a specific InferenceBackend (e.g. a scripted one in unit tests). */
   backendFactory?: () => import("../types/index").InferenceBackend;
 }
@@ -102,12 +104,15 @@ export function buildContext(opts: ServeOptions = {}): AppContext {
   };
 }
 
-export function createServer(ctx: AppContext, security: SecurityOptions = securityFromEnv()) {
+export function createServer(ctx: AppContext, security: SecurityOptions = securityFromEnv(), control?: ServerControl) {
   return http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const cancellation = new AbortController();
     const abort = () => cancellation.abort();
     res.once("close", abort);
     try {
+      if (control && req.url === CONTROL_ROUTE && (req.method === "GET" || req.method === "POST")) {
+        return handleServerControl(req, res, control);
+      }
       const denied = checkRequest(req, security);
       if (denied) {
         res.writeHead(denied.status, { "Content-Type": "application/json" });
@@ -157,7 +162,7 @@ export function createServer(ctx: AppContext, security: SecurityOptions = securi
 
 export async function serve(opts: ServeOptions = {}): Promise<{ port: number; close: () => Promise<void> }> {
   const ctx = buildContext(opts);
-  const server = createServer(ctx);
+  const server = createServer(ctx, securityFromEnv(), opts.control);
   const port = opts.port ?? 8080;
 
   await new Promise<void>((resolve, reject) => {

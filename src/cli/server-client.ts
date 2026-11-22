@@ -1,8 +1,14 @@
+import { activeBackgroundPort } from "./background-server";
+
 export function parseServerPort(value: string | undefined, allowZero = false): number {
   if (!value || !/^\d+$/.test(value) || Number(value) < (allowZero ? 0 : 1) || Number(value) > 65535) {
     throw new Error(`--port must be an integer from ${allowZero ? 0 : 1} to 65535.`);
   }
   return Number(value);
+}
+
+export async function serverPort(value?: string): Promise<number> {
+  return value === undefined ? (await activeBackgroundPort()) ?? 8080 : parseServerPort(value);
 }
 
 export async function serverRequest<T>(port: number, route: string, body?: object): Promise<T> {
@@ -29,7 +35,7 @@ export async function runPrompt(args: string[]): Promise<void> {
   if (!model || !prompt?.trim() || (args.length !== 2 && (args.length !== 4 || portFlag !== "--port"))) {
     throw new Error('Usage: localcoder run <model> "<prompt>" [--port <port>]');
   }
-  const port = portFlag ? parseServerPort(portValue) : 8080;
+  const port = await serverPort(portValue);
   const response = await serverRequest<{ choices?: { message: { content: string } }[] }>(port, "/v1/chat/completions", {
     model, messages: [{ role: "user", content: prompt }], stream: false,
   });

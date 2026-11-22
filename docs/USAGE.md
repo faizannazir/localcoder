@@ -3,7 +3,9 @@
 ## CLI commands
 
 ```bash
-localcoder serve [--port 8080] [--backend llama|mock]
+localcoder serve [--background] [--port 8080] [--backend llama|mock]
+localcoder start [--port 8080] [--backend llama|mock]
+localcoder status | stop | restart
 localcoder doctor
 localcoder agent "<task>" [--model <id>] [--session <id>] [--resume <task_id>]
 localcoder undo [task_id] [--force]
@@ -27,13 +29,25 @@ For a one-model task, pick an installed ID from `localcoder models list` and run
 
 With the server running, `localcoder run <id> "<prompt>"` sends a chat request from the terminal. Use `models load <id>` to warm a model, `models ps` to see what is in memory, and `models unload <id>` to release it after active requests finish. Unloading leaves the weights on disk. Pass `--port <port>` when the server uses a different port.
 
+## Run the server in the background
+
+```bash
+localcoder start --port 8080
+localcoder status
+localcoder models ps
+localcoder restart
+localcoder stop
+```
+
+`start` and `serve --background` manage one server per `LOCALCODER_HOME`. Start it from the project you want to use. Check its port, workspace, and log path with `status`. `restart` reuses the port, backend, and workspace and reads authentication from the current environment. Restart after installing a new model to refresh the server's registry. `run` and model residency commands default to the managed server's port. For foreground servers, press Ctrl+C to stop.
+
 ## Project settings
 
 Run these commands from the project directory. `config list` shows the project overrides and detected npm scripts. `config path` reports the workspace file, and `config unset` restores the default for a setting.
 
 ```bash
 localcoder config list
-localcoder config set models '{"planner":"qwen2.5-coder-0.5b-q4","coder":"qwen2.5-coder-1.5b-q4","reviewer":"qwen2.5-coder-0.5b-q4"}'
+localcoder config set models '{"planner":"qwen2.5-coder-0.5b-q4","coder":"qwen2.5-coder-1.5b-q4","reviewer":"qwen2.5-coder-1.5b-q4"}'
 localcoder config set test '["node","--test"]'
 localcoder config set timeout_ms 60000
 localcoder config get models

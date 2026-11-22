@@ -11,6 +11,7 @@ import { runAgent, runUndo } from "./agent-cmd";
 import { runVerify } from "./verify";
 import { runConfig } from "./config";
 import { runPrompt } from "./server-client";
+import { manageBackgroundServer } from "./background-server";
 
 async function main() {
   const [, , command, ...rest] = process.argv;
@@ -18,6 +19,14 @@ async function main() {
   switch (command) {
     case "serve":
       await runServe(rest);
+      return;
+    case "start":
+      await runServe([...rest, "--background"]);
+      return;
+    case "status":
+    case "stop":
+    case "restart":
+      await manageBackgroundServer(command, rest);
       return;
     case "run":
       await runPrompt(rest);
@@ -65,7 +74,9 @@ async function main() {
           "LocalCoder — local inference, repository intelligence, and coding tools",
           "",
           "Usage:",
-          "  localcoder serve [--port 8080] [--backend llama|mock]",
+          "  localcoder serve [--background] [--port 8080] [--backend llama|mock]",
+          "  localcoder start [--port 8080] [--backend llama|mock]",
+          "  localcoder status | stop | restart",
           '  localcoder run <id> "<prompt>" [--port <port>]',
           "  localcoder doctor",
           "  localcoder models list [--downloaded]",
