@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible LocalCoder problem.
+body:
+  - type: markdown
+    attributes:
+      value: Remove API keys, private paths, and proprietary code from your report. Use the Security tab for vulnerabilities.
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest project or command that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual results
+      description: Include the error message or a short, redacted output excerpt.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: LocalCoder revision, Node.js version, OS, and architecture
+      placeholder: "Commit abc1234, Node.js 22.13, macOS arm64"
+    validations:
+      required: true
+  - type: textarea
+    id: inference
+    attributes:
+      label: Model and engine details
+      description: For inference problems, include the GGUF model and quantization, llama.cpp build, and relevant redacted localcoder doctor output.

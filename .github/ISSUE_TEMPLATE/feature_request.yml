@@ -1,0 +1,17 @@
+name: Feature request
+description: Propose an improvement to a LocalCoder workflow.
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: What are you trying to do?
+      description: Describe your workflow, where you get stuck, and any relevant hardware or editor constraints.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What outcome would help?
+      description: Give an example of the behavior you want.
+    validations:
+      required: true
