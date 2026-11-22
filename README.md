@@ -1,199 +1,80 @@
 # LocalCoder
 
-LocalCoder runs a local coding assistant backed by llama.cpp. It combines hardware-aware model routing, a streaming HTTP API, repository search, persistent project memory, and a coding agent that edits files and runs configured checks.
+**LocalCoder is an open-source local AI coding agent for your terminal and editor.** It runs GGUF models through llama.cpp on your machine, searches your repository, edits files, and runs your project's checks. The memory router chooses models that fit your hardware. A task can use separate planner, coder, and reviewer models, loaded one at a time.
 
-## Features
+[Quick start](#quick-start) · [Try the coding demo](docs/DEMO.md) · [Connect an editor](docs/USAGE.md#using-localcoder-from-an-ide) · [Contribute](CONTRIBUTING.md)
 
-- Routes tasks to installed GGUF models according to memory, battery, and thermal policy.
-- Manages llama-server processes, model residency, and concurrent inference requests.
-- Streams chat responses and fill-in-middle code completions over HTTP.
-- Indexes repository files in SQLite and extracts JavaScript, TypeScript, and Python symbols with heuristic parsers.
-- Assembles context within a token budget using search results, project memory, task state, and cached summaries.
-- Creates files, applies targeted edits, removes explicitly authorized files, runs validation, and supports conflict-aware undo.
+## Quick start
 
-## Install
-
-Use **Node.js 22.13 or newer** and npm. For a trained-model setup on Apple Silicon, run this from the checkout:
+On an **Apple Silicon Mac**, install Node.js 22.13 or newer and npm, then run:
 
 ```bash
-bash scripts/setup-macos.sh
+git clone https://github.com/faizannazir/localcoder.git
+cd localcoder
+bash scripts/setup-macos.sh --link
+localcoder doctor
+node scripts/demo.cjs
 ```
 
-The installer downloads about 1.14 GB of pinned engine and model files. For other platforms or an existing engine, follow the [installation guide](docs/INSTALL.md). To install dependencies and build without downloading a model:
+Setup downloads about 1.14 GB of pinned engine and model files. The demo starts with a failing JavaScript test, asks a trained Qwen model to repair the bug, reruns the original test independently, and verifies undo. It works in a disposable directory. If memory is tight, `doctor` reports the available budget. [Demo and troubleshooting](docs/DEMO.md)
+
+For **Windows and Linux**, or to use an existing llama.cpp installation, see the [platform setup guide](docs/SETUP-WINDOWS-LINUX-MAC.md). Use the [model guide](docs/MODELS.md) to select, download, or import a GGUF.
+
+## Work with a repository
+
+Run these commands from the repository you want to work on:
+
+```bash
+localcoder index .
+localcoder search "parseToken"
+localcoder agent "Fix the failing token parser test"
+localcoder undo
+```
+
+- **Repository search and project memory.** A local SQLite index stores text and extracted JavaScript, TypeScript, and Python symbols. The agent reuses unchanged file views and carries compact task context between runs. [Search and memory commands](docs/USAGE.md#repository-intelligence-and-memory)
+- **File edits and undo.** Targeted edits preserve supported encodings, BOMs, and line endings. Deletion requires an explicit file path. Undo restores the original bytes and checks for later edits. [File operations](docs/USAGE.md#file-operations)
+- **Planner, coder, and reviewer.** Configure role assignments to switch models within one task. The reviewer gets the diff, selected file excerpts, and test results. The live memory gate checks each model before loading it. [Sequential workflows](docs/USAGE.md#planner-coder-and-reviewer-workflow)
+
+Here is an example role configuration for the two downloadable Qwen models. Run `localcoder models list --downloaded` to find the IDs available on your machine.
+
+```bash
+localcoder config set models '{"planner":"qwen2.5-coder-0.5b-q4","coder":"qwen2.5-coder-1.5b-q4","reviewer":"qwen2.5-coder-1.5b-q4"}'
+```
+
+The agent runs checks configured in `.localcoder/agent.json` or discovered from `package.json`. Use it in workspaces whose scripts you trust. [Agent configuration](docs/USAGE.md#coding-agent)
+
+## Terminal chat and editor setup
+
+```bash
+localcoder models list --downloaded
+localcoder start --port 8080
+localcoder run qwen2.5-coder-1.5b-q4 "Explain a JavaScript closure"
+localcoder stop
+```
+
+While the server is running, point a Chat Completions client at `http://127.0.0.1:8080/v1` and select an installed model ID. The [editor setup guide](docs/USAGE.md#using-localcoder-from-an-ide) covers Continue Chat and VS Code's custom endpoint. The API also exposes fill-in-middle completions and a separate endpoint for the coding workflow. [API reference](docs/USAGE.md#api)
+
+On macOS 27, Apple’s built-in `system` model is available for editor chat through Apple’s `fm serve`. Use LocalCoder’s GGUF backend for workspace edits, verification, and undo. [Apple Foundation Model setup](docs/USAGE.md#apple-foundation-model-chat-on-macos-27)
+
+## Performance and verification
+
+A dense search fixture with 15,000 matching lines ran in about **8 ms median**, down from about **550 ms** before the search changes, on an M1 Pro. This measures indexed text search on a synthetic repository. [Method and scope](docs/TECHNICAL-NOTES.md#repository-search-and-file-identity)
 
 ```bash
 npm ci
 npm run build
-node dist/cli/index.js --help
-node dist/cli/index.js doctor
-```
-
-Run `bash scripts/setup-macos.sh --link` from the checkout to use `localcoder` directly from any project directory. Then run `localcoder doctor` to check the engine and current memory budget.
-
-After linking, use `localcoder models list --downloaded` to find an installed model. Run `localcoder start` from your project to start the API in the background, `localcoder run <id> "<prompt>"` to prompt a model, and `localcoder stop` when finished. [Terminal commands and IDE setup](docs/USAGE.md)
-
-The `doctor` command reports the hardware profile, resource policy, and model routing decisions. LocalCoder calculates a conservative memory budget before loading a model. On macOS, the available-memory estimate includes reclaimable file cache. Requests receive an HTTP `503` when every candidate exceeds the budget.
-
-Real inference requires a compatible GGUF model and the platform-specific llama-server binary. Extract the full llama.cpp release archive so its companion libraries remain beside the executable. Register a downloaded model, then start the server.
-
-```bash
-export LOCALCODER_LLAMA_SERVER_BIN=/absolute/path/to/llama-server
-node dist/cli/index.js models add /absolute/path/to/model.gguf
-node dist/cli/index.js models
-node dist/cli/index.js serve --port 8080
-```
-
-Registered models are recorded in `~/.localcoder/models.local.json`. Set `LOCALCODER_HOME` to choose another user-data directory. The server uses the current working directory as its repository workspace and listens on `127.0.0.1`.
-
-For Windows commands, engine downloads, and model sizing, follow the setup and model guides. [Platform setup](docs/SETUP-WINDOWS-LINUX-MAC.md) · [Installation](docs/INSTALL.md) · [Models](docs/MODELS.md)
-
-## Try a real coding task
-
-After the Apple Silicon setup, run `node scripts/demo.cjs` from the checkout. The demo repairs a bug using a trained model, reruns the original test, and checks that undo restores the disposable workspace. [Demo instructions](docs/DEMO.md)
-
-## Run with the mock backend
-
-The mock backend returns responses labeled `[mock:...]` and exercises request routing and streaming without downloading an engine or model. It uses the same resource-policy gate.
-
-```bash
-node dist/cli/index.js serve --backend mock --port 8080
-```
-
-## HTTP API
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| GET | `/v1/models` | Model registry, installation status, and residency |
-| GET | `/v1/resource` | Hardware profile, resource policy, and available repository statistics |
-| POST | `/v1/chat/completions` | Generate a chat response as JSON or a stream |
-| POST | `/v1/completions` | Stream fill-in-middle completions from `prefix` and `suffix` |
-| POST | `/v1/agent/run` | Run or resume a coding task and stream its events |
-| POST | `/v1/agent/undo` | Undo edits from a saved task |
-
-Chat uses OpenAI-style server-sent events and ends with `data: [DONE]`. Fill-in-middle requires a model with FIM support and accepts `prefix` and `suffix` fields.
-
-```bash
-curl -N http://127.0.0.1:8080/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"Write a function that adds two numbers."}],"max_tokens":64}'
-
-curl -N http://127.0.0.1:8080/v1/completions \
-  -H 'Content-Type: application/json' \
-  -d '{"prefix":"function add(a, b) {\n  return ","suffix":"\n}","max_tokens":32}'
-```
-
-POST requests require JSON. Set `LOCALCODER_API_TOKEN` to require bearer authentication. Browser origins and additional Host headers can be configured with `LOCALCODER_ALLOWED_ORIGINS` and `LOCALCODER_ALLOWED_HOSTS`. [CLI and API usage](docs/USAGE.md)
-
-## Work with a repository
-
-Run workspace commands from the repository you want to inspect or edit. Point `LOCALCODER_CLI` to this project's built CLI before changing directories.
-
-```bash
-LOCALCODER_CLI=/absolute/path/to/localcoder/dist/cli/index.js
-cd /absolute/path/to/your-project
-
-node "$LOCALCODER_CLI" index .
-node "$LOCALCODER_CLI" search "add"
-node "$LOCALCODER_CLI" symbols "add"
-node "$LOCALCODER_CLI" context "add" --budget 4096 --explain
-node "$LOCALCODER_CLI" memory status
-```
-
-Indexes, memory, saved agent tasks, and edit backups live under the workspace's `.localcoder/` directory. `index . --watch` explicitly starts incremental updates. Context output identifies estimated token counts.
-
-With a suitable local model available, the agent can inspect the repository, propose targeted edits, and run validation.
-
-```bash
-node "$LOCALCODER_CLI" agent "Fix the add function so its tests pass" --session arithmetic
-node "$LOCALCODER_CLI" agent "continue"
-node "$LOCALCODER_CLI" undo
-```
-
-The agent discovers `test`, `lint`, and `build` scripts from `package.json`. Configure targeted checks and formatting in `.localcoder/agent.json` when needed. The `{file}` placeholder receives a validated workspace path.
-
-```json
-{
-  "test": ["node", "--test"],
-  "test_target": ["node", "--test", "{file}"],
-  "timeout_ms": 120000
-}
-```
-
-To use separate models within one task, add all three role IDs from `localcoder models` to the same configuration:
-
-```json
-{
-  "models": {
-    "planner": "your-planner-model-id",
-    "coder": "your-coder-model-id",
-    "reviewer": "your-reviewer-model-id"
-  },
-  "test": ["node", "--test"],
-  "test_target": ["node", "--test", "{file}"]
-}
-```
-
-The CLI and `/v1/agent/run` use this configuration. The planner prepares a compact plan; the coder edits and runs checks; the reviewer receives bounded current-file excerpts, the complete task diff, and validation evidence. Review prompts disclose omitted excerpts and possible truncation. Rejected reviews return actionable findings to the bounded repair loop. Configured tests must pass before reviewer approval can complete the task, including when the coder proposes no changes.
-
-Each role loads alone and unloads before the next role or queued inference request can use the manager. Context assembly and token counting use that role's model and context limit. The hardware gate runs again before each load. This reduces simultaneous model memory; each complete model and its cache must still fit the current safe budget. Assigning the same installed ID to several roles is supported, with a fresh load for each call. CLI `model:` lines and API `model` events show the selected role and ID.
-
-Saved workflow tasks retain their assignments on resume. Removing `models` from current configuration does not bypass a saved review. Workspaces without `models` keep the single-model workflow, and older saved tasks resume in that mode.
-
-Each run reports its verification level. Undo checks for later file changes and preserves completed rollback progress across retries. Project commands execute with the current user's permissions. The path jail and command allowlist operate at the application level, and repository scripts can access resources available to that user.
-
-## Verify and test
-
-Run the automated checks from the LocalCoder repository root.
-
-```bash
 npm run typecheck
-npm run build
 npm test
 ```
 
-Set `LOCALCODER_LLAMA_SERVER_BIN` to include real llama.cpp integration tests. Those tests generate small random-weight GGUF fixtures to validate model loading, tokenization, streaming, cache settings, and process cleanup. Model-quality evaluation requires a trained model. Tests that need unavailable engine components or more live memory report a skip.
+Set `LOCALCODER_LLAMA_SERVER_BIN` to a local llama.cpp binary to include native-engine tests. The suite uses generated model fixtures for protocol and process checks. Run the [trained-model demo](docs/DEMO.md) to evaluate coding behavior. [Verification notes](docs/VERIFICATION.md)
 
-The `verify` command checks your installed engine and model, then attempts a coding task in a disposable repository. It writes a JSON report and returns an exit code of `0` for success, `1` for failed checks, or `2` for missing components.
+## Contribute
 
-```bash
-node dist/cli/index.js verify
-npm run bench:index
-npm run bench:context
-```
+Start with a [bug report or feature request](https://github.com/faizannazir/localcoder/issues/new/choose), or pick a small contribution in the [contributor guide](CONTRIBUTING.md). Clean-checkout setup reports, Windows and Linux verification, and reproducible local-model results are especially welcome.
 
-The benchmarks use synthetic repositories and print measurements for the current machine. Stored verification documents describe the environment and results from their recorded run. [Verification notes](docs/VERIFICATION.md) · [Historical verification report](docs/verification-report.json)
+Use the [security policy](SECURITY.md) for private vulnerability reporting. LocalCoder is licensed under [Apache-2.0](LICENSE).
 
-## Repository layout
+## Acknowledgment
 
-```text
-src/
-  agent/       Task execution, file tools, validation, and undo
-  cli/         Command-line entry points
-  context/     Context assembly and token accounting
-  hardware/    Platform hardware probes
-  index/       SQLite index, search, and symbol extraction
-  inference/   llama.cpp and mock backends, GGUF metadata
-  manager/     Model residency and request coordination
-  memory/      Project, task, and session memory
-  policy/      Resource policy
-  router/      Task classification and model selection
-  server/      HTTP server and routes
-  types/       Shared interfaces
-  util/        Paths and engine discovery
-test/
-  core/        Routing, hardware, and inference API checks
-  repository/  Indexing, search, and context tests
-  memory/      Persistent memory and context reuse tests
-  agent/       Editing, validation, recovery, and undo tests
-  inference/   GGUF and real-engine integration tests
-  server/      Request security and process lifecycle tests
-registry/      Shipped model metadata
-scripts/       Benchmarks and synthetic model generation
-docs/          Setup, usage, models, and verification records
-```
-
-Licensed under Apache-2.0. [License](LICENSE)
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and contribution ideas. Report security issues privately as described in [SECURITY.md](SECURITY.md).
+Thanks to the llama.cpp maintainers and contributors. Their inference engine makes it possible for LocalCoder to load and run GGUF models on your machine. [llama.cpp](https://github.com/ggml-org/llama.cpp)
