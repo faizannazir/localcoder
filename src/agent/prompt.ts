@@ -25,6 +25,19 @@ async function shrinkToTokens(text: string, tokens: number, count: Counter): Pro
  * ones are truncated rather than dropped; required ones are never dropped.
  */
 export async function fitPrompt(system: string, sections: PromptSection[], budget: number, counter: TokenCounter) {
+  const active = sections.filter((section) => section.text.trim() !== "");
+  // Avoid the extra request when the sections are clearly too large to combine.
+  if (system.length + active.reduce((size, section) => size + section.text.length, 0) <= budget * 8 &&
+      new Set(active.map((section) => section.id)).size === active.length) {
+    const user = active.map((section) => `## ${section.id}\n${section.text}`).join("\n\n");
+    const measured = await counter.count(system + "\n" + user);
+    if (measured.count <= budget) {
+      return {
+        messages: [{ role: "system" as const, content: system }, { role: "user" as const, content: user }],
+        tokens: measured.count, basis: measured.basis, dropped: [], truncated: [],
+      };
+    }
+  }
   const count: Counter = async (t) => (await counter.count(t)).count;
   let basis: "measured" | "estimated" = "measured";
   const countB: Counter = async (t) => { const r = await counter.count(t); if (r.basis === "estimated") basis = "estimated"; return r.count; };
@@ -32,8 +45,7 @@ export async function fitPrompt(system: string, sections: PromptSection[], budge
   const included = new Map<string, string>();
   const dropped: string[] = [], truncated: string[] = [];
   const rank = (s: PromptSection) => (s.required ? Number.MAX_SAFE_INTEGER : s.priority);
-  for (const s of [...sections].sort((a, b) => rank(b) - rank(a))) {
-    if (s.text.trim() === "") continue;
+  for (const s of active.sort((a, b) => rank(b) - rank(a))) {
     const header = `## ${s.id}\n`;
     const c = await countB(header + s.text);
     if (used + c <= budget) { included.set(s.id, s.text); used += c; continue; }
