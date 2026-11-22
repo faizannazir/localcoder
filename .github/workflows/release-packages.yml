@@ -1,0 +1,81 @@
+name: Build release packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      release-name: ${{ steps.version.outputs.name }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - id: version
+        shell: bash
+        run: |
+          name="$(node -p '"localcoder-v" + require("./package.json").version')"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - run: node scripts/package-release.cjs "$RUNNER_TEMP/release-files"
+      - name: Verify archive hashes
+        working-directory: ${{ runner.temp }}/release-files
+        run: sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release-files/
+          if-no-files-found: error
+          compression-level: 0
+
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            archive: linux.tar.gz
+          - runner: macos-latest
+            archive: macos.tar.gz
+          - runner: windows-latest
+            archive: windows.zip
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    env:
+      RELEASE_NAME: ${{ needs.build.outputs.release-name }}
+      ARCHIVE_SUFFIX: ${{ matrix.archive }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release-files
+      - name: Smoke test the macOS or Linux archive
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          tar -xzf "$RUNNER_TEMP/release-files/$RELEASE_NAME-$ARCHIVE_SUFFIX" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/$RELEASE_NAME/localcoder" --help
+          node scripts/smoke-release.cjs "$RUNNER_TEMP/$RELEASE_NAME"
+      - name: Smoke test the Windows ZIP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "release-files/$env:RELEASE_NAME-$env:ARCHIVE_SUFFIX"
+          Expand-Archive -Path $archive -DestinationPath $env:RUNNER_TEMP
+          $extracted = Join-Path $env:RUNNER_TEMP $env:RELEASE_NAME
+          & (Join-Path $extracted "localcoder.cmd") --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/smoke-release.cjs $extracted

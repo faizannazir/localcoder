@@ -1,6 +1,6 @@
 # LocalCoder setup: Windows, Linux, and macOS
 
-This guide installs LocalCoder with a **real local model**. You need three things: Node.js/npm for LocalCoder, a platform-matched `llama-server` executable, and a `.gguf` model file. LocalCoder does not automatically download the engine or model.
+This guide installs LocalCoder with a **real local model**. You need Node.js for LocalCoder, a platform-matched `llama-server` executable, and a `.gguf` model file. You can use the prebuilt CLI from [GitHub Releases](INSTALL.md#install-from-github-releases) or build it from source. The [Apple Silicon setup](INSTALL.md#quick-setup-on-apple-silicon) handles the engine and model downloads from a source checkout.
 
 > **Quick recommendation:** start with the Qwen2.5-Coder 0.5B Instruct model in `Q4_K_M` quantization (roughly 0.4 GB). It is small enough for initial setup and plumbing checks, but it is a small model and should not be expected to perform like a larger coding model. Choose a larger model only if `localcoder doctor` shows enough safe memory.
 

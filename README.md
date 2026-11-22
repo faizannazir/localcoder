@@ -6,6 +6,8 @@
 
 ## Quick start
 
+Prebuilt CLI archives are available for macOS, Linux, and Windows. See [GitHub Releases](https://github.com/faizannazir/localcoder/releases/latest) and the [release installation guide](docs/INSTALL.md#install-from-github-releases).
+
 On an **Apple Silicon Mac**, install Node.js 22.13 or newer and npm, then run:
 
 ```bash
