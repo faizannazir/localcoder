@@ -2,7 +2,7 @@ import os from "os";
 import { HardwareProfiler } from "../hardware/profiler";
 import { DefaultPolicyEngine } from "../policy/engine";
 import { DefaultModelRouter } from "../router/router";
-import { loadFullRegistry, isDownloaded } from "../router/registry";
+import { loadFullRegistry, installedOnly } from "../router/registry";
 import { isRejection } from "../types/index";
 import { locateLlamaServer } from "../util/paths";
 
@@ -11,12 +11,13 @@ export async function runDoctor(): Promise<void> {
   const policyEngine = new DefaultPolicyEngine();
   const router = new DefaultModelRouter();
 
-  const registry = loadFullRegistry();
+  const registry = installedOnly(loadFullRegistry());
   const engine = locateLlamaServer();
 
   const profile = await profiler.sample();
   const policy = policyEngine.derive(profile);
-  const decision = router.route("normal_coding", policy, registry);
+  const decision = router.route("chat_simple", policy, registry);
+  const agent = router.route("hard_agent", policy, registry);
 
   const lines: string[] = [];
   lines.push(`localcoder doctor`);
@@ -34,6 +35,9 @@ export async function runDoctor(): Promise<void> {
   lines.push(`Max context      ${policy.max_context_tokens} tokens`);
   lines.push(``);
   lines.push(`llama-server     ${engine.path ? `found at ${engine.path}` : "NOT found — see docs/MODELS.md"}`);
+  lines.push(`Downloaded models (${registry.length})`);
+  for (const entry of registry) lines.push(`  ${entry.model_id}`);
+  if (!registry.length) lines.push("  None. Run localcoder models download <id>.");
   lines.push(``);
 
   if (isRejection(decision)) {
@@ -44,9 +48,10 @@ export async function runDoctor(): Promise<void> {
   } else {
     const entry = registry.find((e) => e.model_id === decision.model_id);
     lines.push(`Selected model   ${decision.model_id} (${entry?.parameter_count.total}B${entry?.parameter_count.active ? `, ${entry.parameter_count.active}B active` : ""}, ${entry?.quantization})`);
-    lines.push(`                   downloaded: ${entry ? isDownloaded(entry) : false}`);
+    lines.push(`                   downloaded: true`);
     lines.push(`                   ctx window: ${decision.ctx_window}, kv dtype: ${decision.kv_cache_dtype}, gpu offload: ${(decision.gpu_offload_fraction * 100).toFixed(0)}%`);
   }
+  lines.push(`Coding agent     ${isRejection(agent) ? `none — ${agent.reason}` : `${agent.model_id} (context ${agent.ctx_window})`}`);
 
   // eslint-disable-next-line no-console
   console.log(lines.join("\n"));

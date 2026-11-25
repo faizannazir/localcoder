@@ -48,17 +48,27 @@ test("doctor reports the configured engine and user-registered model", async (t)
     writeFileSync(engine, "#!/bin/sh\nexit 0\n");
     chmodSync(engine, 0o755);
     writeFileSync(model, "fixture placeholder");
-    writeFileSync(path.join(root, "models.local.json"), JSON.stringify([{
+    const larger = path.join(root, "doctor-larger.gguf");
+    writeFileSync(larger, "fixture");
+    const entry = {
       model_id: "doctor-user-model", architecture: "dense", parameter_count: { total: 0.01 },
       quantization: "F32", file_path: model, context_limit: 4096, backend_requirements: ["cpu"],
       estimated_memory_gb: 0.01, capabilities: ["fim"],
-    }]));
+    };
+    writeFileSync(path.join(root, "models.local.json"), JSON.stringify([entry,
+      { ...entry, model_id: "doctor-coding-model", file_path: larger, parameter_count: { total: 14 } },
+      { ...entry, model_id: "doctor-missing-model", file_path: path.join(root, "missing.gguf"), parameter_count: { total: 100 } },
+    ]));
     process.env.LOCALCODER_HOME = root;
     process.env.LOCALCODER_LLAMA_SERVER_BIN = engine;
     await runDoctor();
     const text = output.join("\n");
     assert.match(text, /Selected model\s+doctor-user-model/);
     assert.match(text, /downloaded: true/);
+    assert.match(text, /Downloaded models \(\d+\)/);
+    assert.match(text, /^  doctor-coding-model$/m);
+    assert.match(text, /Coding agent\s+doctor-coding-model/);
+    assert.doesNotMatch(text, /doctor-missing-model/);
     assert.ok(text.includes(engine), "doctor should report the engine selected by the shared locator");
   } finally {
     if (previousHome === undefined) delete process.env.LOCALCODER_HOME;
