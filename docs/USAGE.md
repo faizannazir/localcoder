@@ -112,7 +112,7 @@ If the memory-safety gate rejects every candidate model, you'll get a clean `503
 
 ## Using LocalCoder from an IDE
 
-The tested integration is the CLI in an IDE terminal, plus the native `/v1/agent/run` HTTP/SSE endpoint. There is no dedicated LocalCoder VS Code extension yet. Run from the project you want to edit:
+Use LocalCoder's coding workflow from the IDE terminal, or configure an existing editor extension to use LocalCoder for model inference. To run the workflow in the terminal, use the project you want to edit:
 
 ```bash
 export LOCALCODER_ROOT=/absolute/path/to/localcoder
@@ -144,37 +144,53 @@ For a chat client, start the server from the target project:
 node "$LOCALCODER_CLI" serve --port 8080
 ```
 
-Use a model ID returned as `id` by `GET /v1/models`. This example selects the 1.5B model installed by the Apple Silicon setup. A Continue chat configuration can follow its [official OpenAI-provider configuration](https://docs.continue.dev/customize/model-providers/top-level/openai):
+### VS Code Copilot Chat and Continue
 
-```yaml
-name: LocalCoder chat
-version: 1.0.0
-schema: v1
-models:
-  - name: LocalCoder Qwen Coder 1.5B
-    provider: openai
-    model: qwen2.5-coder-1.5b-q4
-    apiBase: http://127.0.0.1:8080/v1
-    apiKey: local
-    roles: [chat]
-    useResponsesApi: false
-    useLegacyCompletionsEndpoint: false
-    defaultCompletionOptions:
-      maxTokens: 512
+Start LocalCoder on the computer where the editor extension runs. Pick a model by its exact ID from the local API. A model with a tool-capable chat template can be used for Agent mode.
+
+```bash
+localcoder start
+curl http://127.0.0.1:8080/v1/models
+localcoder vscode <model-id> --tools
+localcoder vscode <model-id> --tools --continue
 ```
 
-This is a configuration example, not an end-to-end tested extension integration. Use Chat mode. If server authentication is enabled, replace the dummy client key with your `LOCALCODER_API_TOKEN`; keep real keys out of shared configuration.
+Pass multiple model IDs to one command to show each in the editor's picker. For example, `localcoder vscode qwen2.5-coder-0.5b-q4 qwen2.5-coder-1.5b-q4` adds both downloaded models for chat when they fit. Each inference request uses the selected model.
 
-For VS Code with Copilot Chat, open **Chat: Manage Language Models**, choose **Add Models → Custom Endpoint**, and select **Chat Completions**. Use the full URL `http://127.0.0.1:8080/v1/chat/completions` and the same model ID. Set `toolCalling` and `vision` to `false`; use **Ask** for text chat. Start with `maxInputTokens: 3000` and `maxOutputTokens: 512` so the request leaves room under tighter memory policies. See the [VS Code custom endpoint instructions](https://code.visualstudio.com/docs/agent-customization/language-models#_add-a-custom-endpoint-model).
+For **Copilot Chat**, open **Chat: Manage Language Models**, choose **Add Models → Custom Endpoint → Chat Completions**, and add the generated model group to `chatLanguageModels.json`. Select the model in Chat and choose **Agent** when `toolCalling` is enabled. If the file already contains groups, add the new group to the existing array. [VS Code custom endpoints](https://code.visualstudio.com/docs/agent-customization/language-models#_add-a-custom-endpoint-model)
 
-The API supports these chat clients' request formats. The desktop extension flows require their own verification:
+For **Continue**, open your local `config.yaml` and use the `--continue` output. It is valid YAML written in JSON syntax. If you have an existing configuration, merge its model entry into your `models` list. The generated entry sets Chat Completions, context limits, and `tool_use` when available. Select your model, then choose **Agent**. [Continue model capabilities](https://docs.continue.dev/customize/deep-dives/model-capabilities)
 
-- Chat supports streaming and explicit `stream: false`, with strings or text parts and system/developer/user/assistant roles. It accepts `max_tokens` and `max_completion_tokens`. Native tool calls, images, and `/v1/responses` are outside this chat API.
-- Chat honors an installed `model` ID and reports unknown IDs with HTTP 404. Use `localcoder-auto` or omit `model` for automatic routing. Every selection still uses the live memory gate.
-- `/v1/completions` takes `prefix` and optional `suffix`, rather than a standard OpenAI `prompt` body. An autocomplete client needs the appropriate adapter.
-- Chat requests do not invoke LocalCoder's plan/code/review loop. An IDE agent integration must call `/v1/agent/run` and handle its events, diffs, validation, resume, and undo.
+Omit `--tools` for Ask or Chat mode. If the service requires `LOCALCODER_API_TOKEN`, set it when running the setup command. Enter the key through the Copilot provider prompt or put it in Continue's private `~/.continue/.env` on macOS/Linux or `%USERPROFILE%\.continue\.env` on Windows. The generated settings reference the secret without printing it. [Continue secret configuration](https://docs.continue.dev/faqs#managing-local-secrets-and-environment-variables)
 
-Cline, Aider, OpenCode, Continue Agent mode, and other integrations should not be advertised as plug-and-play until their actual request formats and workflows are tested. Continue [documents tool-use capability as required for Agent mode](https://docs.continue.dev/customize/deep-dives/model-capabilities).
+To see both installed models and the automatic choices for chat and coding, run `localcoder doctor`. Pick either installed model by ID for ordinary chat. For Agent mode, a GGUF template must support function calls and the model must generate them reliably. The Qwen2.5-Coder 1.5B model returned textual JSON in the real tool-call trial. Use it for Ask mode. To import a tool-capable GGUF, run `localcoder models add <file.gguf>`, then restart the server and use the registered ID.
+
+To try the model that completed the editor tool-call smoke test, run:
+
+```bash
+localcoder models download qwen3-0.6b-q8-0
+localcoder start
+localcoder vscode qwen3-0.6b-q8-0 --tools
+localcoder vscode qwen3-0.6b-q8-0 --tools --continue
+```
+
+If a managed server is already running, run `localcoder restart` after the download instead of `localcoder start`.
+
+The setup command uses the live GGUF routing budget and leaves room for the model's chat template. If RAM availability changes, rerun the command. For a context error, start a fresh chat, remove large attachments, or deselect unused tools. Agent mode uses the editor's own tools and approval settings. LocalCoder's repository workflow with its separate planner, coder, reviewer, and undo uses `localcoder agent` or `/v1/agent/run`.
+
+### Microsoft Foundry Local models
+
+Install Foundry Local, download and load a chat model, and run `foundry server status` to find its local port. Replace `5272` in the example with that port. [Foundry CLI](https://learn.microsoft.com/en-us/azure/foundry-local/reference/reference-cli)
+
+```bash
+LOCALCODER_FOUNDRY_ENDPOINT=http://127.0.0.1:5272 localcoder start
+curl http://127.0.0.1:8080/v1/models
+localcoder run foundry/<model-id> "Explain a JavaScript closure"
+localcoder vscode foundry/<model-id> --tools
+localcoder vscode foundry/<model-id> --tools --continue
+```
+
+In PowerShell set `$env:LOCALCODER_FOUNDRY_ENDPOINT = 'http://127.0.0.1:5272'` before starting. If LocalCoder is already running, restart it with the environment variable set. Use IDs exactly as listed by LocalCoder, including the `foundry/` prefix. Pass `--tools` only for a Foundry model whose catalog lists tool-calling support. Use `--input-tokens <count>` to set the editor input limit for your Foundry model. Foundry handles model loading, memory, and context for these requests. [Foundry REST API](https://learn.microsoft.com/en-us/azure/foundry-local/reference/reference-rest)
 
 ## Apple Foundation Model chat on macOS 27
 

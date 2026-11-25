@@ -5,7 +5,12 @@ import path from "path";
 import os from "os";
 import { buildContext, createServer } from "../../src/server/index";
 import type { AddressInfo } from "net";
+import { createServer as createFixtureServer } from "node:http";
+import { once } from "node:events";
 import { FAKE_PROFILE } from "../agent/helpers";
+import { MockInferenceBackend } from "../../src/inference/mock-backend";
+import { FoundryLocal } from "../../src/inference/foundry-local";
+import { runVscode } from "../../src/cli/vscode";
 
 function makeTempProjectWithTinyModel(extraModel = false): string {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "localcoder-test-"));
@@ -32,9 +37,9 @@ function makeTempProjectWithTinyModel(extraModel = false): string {
   return tmp;
 }
 
-async function startTestServer(extraModel = false) {
+async function startTestServer(extraModel = false, options: Parameters<typeof buildContext>[0] = {}) {
   const tmp = makeTempProjectWithTinyModel(extraModel);
-  const ctx = buildContext({ baseDir: tmp, backend: "mock" });
+  const ctx = buildContext({ baseDir: tmp, backend: "mock", ...options });
   ctx.profiler = { sample: async () => ({ ...FAKE_PROFILE }), onChange: () => () => {} };
   const server = createServer(ctx);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -47,6 +52,125 @@ async function startTestServer(extraModel = false) {
     },
   };
 }
+
+const tools = [{ type: "function", function: { name: "lookup_temperature", parameters: { type: "object" } } }];
+const toolCalls = [{ id: "call_1", type: "function", function: { name: "lookup_temperature", arguments: "{}" } }];
+const history = [
+  { role: "developer", content: [{ type: "text", text: "Use the supplied function when needed." }] },
+  { role: "user", content: "What is the temperature?" },
+  { role: "assistant", content: null, tool_calls: toolCalls },
+  { role: "tool", tool_call_id: "call_1", content: "18 degrees" },
+];
+function requestChat(port: number, body: object) {
+  return fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+}
+
+test("editor setup uses the model's routed context and emits both client formats", async (t) => {
+  const { port, cleanup } = await startTestServer(true);
+  const log = t.mock.method(console, "log", () => {});
+  try {
+    await runVscode(["tiny-test-model", "--port", String(port), "--tools"]);
+    const vscode = JSON.parse(log.mock.calls.at(-1)!.arguments[0]);
+    assert.equal(vscode[0].models[0].toolCalling, true);
+    assert.equal(vscode[0].models[0].maxInputTokens + vscode[0].models[0].maxOutputTokens, 4096 - 256);
+    await runVscode(["tiny-test-model", "--port", String(port), "--continue", "--tools"]);
+    const config = JSON.parse(log.mock.calls.at(-1)!.arguments[0]);
+    assert.deepEqual(config.models[0].capabilities, ["tool_use"]);
+    assert.equal(config.models[0].defaultCompletionOptions.contextLength, 4096 - 256);
+    await runVscode(["tiny-test-model", "--port", String(port)]);
+    assert.equal(JSON.parse(log.mock.calls.at(-1)!.arguments[0])[0].models[0].toolCalling, false);
+    await assert.rejects(runVscode(["tiny-test-model", "--port", String(port), "--input-tokens", "32000"]), /--input-tokens must be from 1/);
+    await runVscode(["tiny-test-model", "explicit-test-model", "--port", String(port), "--tools"]);
+    assert.deepEqual(JSON.parse(log.mock.calls.at(-1)!.arguments[0])[0].models.map((model: { toolCalling: boolean }) => model.toolCalling), [true, false]);
+  } finally { await cleanup(); }
+});
+
+test("editor configs reference authentication without including the token", async (t) => {
+  const prior = process.env.LOCALCODER_API_TOKEN;
+  process.env.LOCALCODER_API_TOKEN = "fixture-local-token";
+  const log = t.mock.method(console, "log", () => {});
+  let cleanup: (() => Promise<void>) | undefined;
+  try {
+    const server = await startTestServer();
+    cleanup = server.cleanup;
+    await runVscode(["tiny-test-model", "--port", String(server.port)]);
+    await runVscode(["tiny-test-model", "--port", String(server.port), "--continue"]);
+    const [vscode, continuation] = log.mock.calls.map((call) => call.arguments[0]);
+    assert.match(vscode, /input:localcoderApiKey/);
+    assert.match(continuation, /secrets.LOCALCODER_API_TOKEN/);
+    assert.doesNotMatch(vscode + continuation, /fixture-local-token/);
+  } finally {
+    if (prior === undefined) delete process.env.LOCALCODER_API_TOKEN;
+    else process.env.LOCALCODER_API_TOKEN = prior;
+    await cleanup?.();
+  }
+});
+
+test("tool-capable backend preserves tool history, streaming deltas, and actionable context errors", async () => {
+  const received: Record<string, unknown>[] = [];
+  const backend = Object.assign(new MockInferenceBackend(), {
+    async chatCompletion(request: Record<string, unknown>) {
+      received.push(request);
+      if (!request.stream) return Response.json({ error: { type: "exceed_context_size_error" } }, { status: 400 });
+      return new Response('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2"}]}}]}\n\ndata: [DONE]\n\n',
+        { headers: { "Content-Type": "text/event-stream" } });
+    },
+  });
+  const { port, cleanup } = await startTestServer(true, { backendFactory: () => backend });
+  try {
+    const reply = await requestChat(port, { model: "tiny-test-model", messages: history, tools, max_completion_tokens: 5000 });
+    assert.equal(reply.status, 200);
+    assert.match(await reply.text(), /call_2[\s\S]*\[DONE\]/);
+    assert.deepEqual((received[0].messages as object[]).slice(2), history.slice(2));
+    assert.equal(received[0].max_tokens, 1024);
+    assert.equal((await requestChat(port, { model: "explicit-test-model", messages: history, tools })).status, 400);
+    const rejected = await requestChat(port, { model: "tiny-test-model", messages: history, tools, stream: false });
+    assert.equal(rejected.status, 400);
+    assert.match(await rejected.text(), /context_length_exceeded/);
+  } finally { await cleanup(); }
+});
+
+test("Foundry Local cached models and tool calls are forwarded to one configured loopback service", async () => {
+  let upstreamBody = "";
+  let redirected = false;
+  const upstream = createFixtureServer(async (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    if (req.url === "/openai/models") { res.end(JSON.stringify(["fixture-cpu"])); return; }
+    if (req.url === "/unexpected") { redirected = true; res.end("{}"); return; }
+    assert.equal(req.url, "/v1/chat/completions");
+    assert.equal(req.headers.authorization, undefined);
+    upstreamBody = "";
+    for await (const chunk of req) upstreamBody += chunk;
+    if (JSON.parse(upstreamBody).model === "redirect") {
+      res.writeHead(307, { Location: "/unexpected" });
+      res.end();
+      return;
+    }
+    res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: null, tool_calls: toolCalls }, finish_reason: "tool_calls" }] }));
+  }).listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  const endpoint = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`;
+  const { port, cleanup } = await startTestServer(false, { foundryEndpoint: endpoint });
+  try {
+    const models = await (await fetch(`http://127.0.0.1:${port}/v1/models`)).text();
+    assert.match(models, /foundry\/fixture-cpu/);
+    const result = await requestChat(port, { model: "foundry/fixture-cpu", messages: history, tools, stream: false });
+    assert.equal(result.status, 200);
+    assert.match(await result.text(), /tool_calls/);
+    assert.equal(JSON.parse(upstreamBody).model, "fixture-cpu");
+    assert.deepEqual(JSON.parse(upstreamBody).messages.at(-1), history.at(-1));
+    assert.equal((await requestChat(port, { model: "foundry/redirect", messages: history, tools })).status, 502);
+    assert.equal(redirected, false);
+    assert.throws(() => new FoundryLocal("http://192.0.2.10:5272"), /127\.0\.0\.1/);
+    assert.throws(() => new FoundryLocal(endpoint + "/redirect"), /127\.0\.0\.1/);
+  } finally {
+    await cleanup();
+    upstream.close();
+    await once(upstream, "close");
+  }
+});
 
 test("GET /v1/models responds with the registry within budget", async () => {
   const { port, cleanup } = await startTestServer();

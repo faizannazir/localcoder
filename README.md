@@ -54,7 +54,9 @@ localcoder run qwen2.5-coder-1.5b-q4 "Explain a JavaScript closure"
 localcoder stop
 ```
 
-While the server is running, point a Chat Completions client at `http://127.0.0.1:8080/v1` and select an installed model ID. The [editor setup guide](docs/USAGE.md#using-localcoder-from-an-ide) covers Continue Chat and VS Code's custom endpoint. The API also exposes fill-in-middle completions and a separate endpoint for the coding workflow. [API reference](docs/USAGE.md#api)
+Run `localcoder vscode <model-id>` to generate model settings for VS Code Copilot Chat, or add `--continue` for Continue. The command uses the current GGUF context budget. For **Agent** mode, add `--tools` and choose a model that supports function calls. Microsoft Foundry Local models can be selected through the same endpoint using a `foundry/` model ID. [Editor and Foundry setup](docs/USAGE.md#using-localcoder-from-an-ide)
+
+To try the small model verified for tool calling, run `localcoder models download qwen3-0.6b-q8-0`, then generate its editor settings with `localcoder vscode qwen3-0.6b-q8-0 --tools` after starting or restarting the server.
 
 On macOS 27, Apple’s built-in `system` model is available for editor chat through Apple’s `fm serve`. Use LocalCoder’s GGUF backend for workspace edits, verification, and undo. [Apple Foundation Model setup](docs/USAGE.md#apple-foundation-model-chat-on-macos-27)
 

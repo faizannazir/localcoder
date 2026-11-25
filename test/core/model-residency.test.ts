@@ -113,6 +113,23 @@ test("an active model lease prevents eviction until the request releases it", as
   await manager.unloadAll();
 });
 
+test("canceling a pending chat acquisition preserves the leased model and frees the queue", { timeout: 3000 }, async () => {
+  const manager = new DefaultModelManager(registry, () => new MockInferenceBackend());
+  const first = await manager.acquire(decisionFor("a"), lowMemPolicy());
+  const signal = new AbortController();
+  const pending = manager.acquire(decisionFor("b"), lowMemPolicy(), 0, signal.signal);
+  const rejected = assert.rejects(pending, /client disconnected/);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  signal.abort(new Error("client disconnected"));
+  await rejected;
+  const stillAvailable = await manager.acquire(decisionFor("a"), lowMemPolicy());
+  assert.equal(stillAvailable.backend, first.backend);
+  assert.deepEqual(manager.resident().map((item) => item.model_id), ["a"]);
+  first.release();
+  stillAvailable.release();
+  await manager.unloadAll();
+});
+
 test("exclusive model work blocks ordinary acquisitions at roomy budgets and unloads on failure", async () => {
   const manager = new DefaultModelManager(registry, () => new MockInferenceBackend());
   const roomy = { ...lowMemPolicy(), memory_budget_gb: 32 };

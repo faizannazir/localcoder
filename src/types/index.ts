@@ -181,6 +181,7 @@ export interface TokenEvent {
 }
 
 export interface InferenceBackend {
+  chatCompletion?(request: Record<string, unknown>, signal?: AbortSignal): Promise<Response>;
   load(entry: ModelRegistryEntry, decision: RoutingDecision, signal?: AbortSignal): Promise<void>;
   generate(prompt: PromptPayload, params: GenParams): AsyncIterable<TokenEvent>;
   unload(): Promise<void>;

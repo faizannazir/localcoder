@@ -6,6 +6,11 @@ import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
 
 export const modelDownloads = new Map([
+  ["qwen3-0.6b-q8-0", {
+    url: "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/23749fefcc72300e3a2ad315e1317431b06b590a/Qwen3-0.6B-Q8_0.gguf",
+    bytes: 639446688,
+    sha256: "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+  }],
   ["qwen2.5-coder-0.5b-q4", {
     url: "https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF/resolve/ebb2015119c907b064c512bf053e945850b5875f/qwen2.5-coder-0.5b-instruct-q4_k_m.gguf",
     bytes: 491400064,

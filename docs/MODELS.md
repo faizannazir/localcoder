@@ -71,7 +71,10 @@ Run `localcoder models list --downloaded` to see models available on this comput
 ```bash
 localcoder models download qwen2.5-coder-0.5b-q4
 localcoder models download qwen2.5-coder-1.5b-q4
+localcoder models download qwen3-0.6b-q8-0
 localcoder models add /absolute/path/to/custom.gguf
 ```
 
 The download command saves pinned Qwen releases to `~/.localcoder/models` (or `$LOCALCODER_HOME/models`) and verifies the byte count and SHA-256 before making them available. For other GGUF files, download the weights separately and register them with `models add`. The `models remove` command removes a custom registration and leaves its file on disk.
+
+Qwen3 0.6B Q8_0 is a small model for checking editor tool calling. It completed a streaming function call and a follow-up using the tool result through LocalCoder on an M1 Pro. Larger models can be more suitable for complex repository work if they fit your memory budget. [Qwen's model card](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF)

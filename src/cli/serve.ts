@@ -41,7 +41,8 @@ export async function runServe(args: string[]): Promise<void> {
     });
     if (!process.connected) return await shutdown("launcher disconnected");
   }
-  handle = await serve({ port, backend, control: token ? { token, shutdown: () => void shutdown("stop") } : undefined });
+  handle = await serve({ port, backend, foundryEndpoint: process.env.LOCALCODER_FOUNDRY_ENDPOINT,
+    control: token ? { token, shutdown: () => void shutdown("stop") } : undefined });
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   if (token) process.send?.({ port: handle.port });

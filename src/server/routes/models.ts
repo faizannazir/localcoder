@@ -1,9 +1,10 @@
 import type { ServerResponse } from "http";
 import type { AppContext } from "../context";
+import { FOUNDRY_MODEL_PREFIX } from "../../inference/foundry-local";
 import { isDownloaded } from "../../router/registry";
 import { isRejection } from "../../types/index";
 
-export async function handleModels(_body: unknown, res: ServerResponse, ctx: AppContext): Promise<void> {
+export async function handleModels(_body: unknown, res: ServerResponse, ctx: AppContext, signal?: AbortSignal): Promise<void> {
   const residentIds = new Set(ctx.modelManager.resident().map((m) => m.model_id));
 
   const models = ctx.registry.map((entry) => ({
@@ -16,8 +17,21 @@ export async function handleModels(_body: unknown, res: ServerResponse, ctx: App
     downloaded: isDownloaded(entry, ctx.baseDir),
   }));
 
+  let foundry: object[] = [];
+  let foundry_error: string | undefined;
+  if (ctx.foundry) {
+    try {
+      foundry = (await ctx.foundry.models(signal)).map((name) => {
+        const id = FOUNDRY_MODEL_PREFIX + name;
+        return { id, model_id: id, object: "model", created: 0, owned_by: "foundry-local", downloaded: true };
+      });
+    } catch {
+      foundry_error = "Foundry Local model discovery failed. Check the configured endpoint.";
+    }
+  }
+  if (signal?.aborted) return;
   res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ object: "list", data: models }));
+  res.end(JSON.stringify({ object: "list", data: [...models, ...foundry], foundry_error }));
 }
 
 export async function handleModelResidency(body: unknown, res: ServerResponse, ctx: AppContext, operation: "load" | "unload"): Promise<void> {

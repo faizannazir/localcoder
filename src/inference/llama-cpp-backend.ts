@@ -112,8 +112,9 @@ export class LlamaCppBackend implements InferenceBackend {
       "--cache-type-k", decision.kv_cache_dtype,
       "--cache-type-v", decision.kv_cache_dtype,
     ];
+    if (entry.capabilities.includes("tool_calling")) args.push("--jinja");
 
-    const proc = spawn(this.binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(this.binary, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     liveProcs.add(proc);
     installExitHook();
     proc.once("exit", () => liveProcs.delete(proc));
@@ -152,18 +153,13 @@ export class LlamaCppBackend implements InferenceBackend {
     if (!this.port_) throw new Error("LlamaCppBackend.generate() called before load()");
 
     if (prompt.mode === "chat") {
-      const res = await fetch(`http://127.0.0.1:${this.port_}/v1/chat/completions`, {
-        method: "POST",
-        signal: params.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const res = await this.chatCompletion({
           messages: prompt.messages,
           max_tokens: params.max_tokens,
           temperature: params.temperature ?? 0.7,
           stop: params.stop,
           stream: true,
-        }),
-      });
+      }, params.signal);
       if (!res.ok || !res.body) throw new Error(`llama-server chat request failed: ${res.status} ${res.statusText}`);
 
       let index = 0;
@@ -201,6 +197,14 @@ export class LlamaCppBackend implements InferenceBackend {
         yield { token: "", index: index++, finish_reason: "stop" };
       }
     }
+  }
+
+  async chatCompletion(request: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
+    if (!this.port_) throw new Error("LlamaCppBackend.chatCompletion() called before load()");
+    return fetch(`http://127.0.0.1:${this.port_}/v1/chat/completions`, {
+      method: "POST", signal, redirect: "error",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
+    });
   }
 
   async unload(): Promise<void> {

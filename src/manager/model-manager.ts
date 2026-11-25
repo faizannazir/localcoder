@@ -4,6 +4,7 @@ const LOW_MEMORY_RESIDENCY_CAP_GB = 12; // below this budget, AT-0.7 requires ne
 
 interface ResidentEntry {
   loaded: LoadedModel;
+  decision: RoutingDecision;
   backend: InferenceBackend;
   registryEntry: ModelRegistryEntry;
   users: number;
@@ -21,13 +22,13 @@ export class DefaultModelManager implements IModelManager {
   }
 
   /** A request holds its backend until generation and tool use have finished. */
-  acquire(decision: RoutingDecision, policy: ResourcePolicy, priority = 0) {
+  acquire(decision: RoutingDecision, policy: ResourcePolicy, priority = 0, signal?: AbortSignal) {
     return this.exclusive(async () => {
-      const loaded = await this.ensureResident(decision, policy, priority);
+      const loaded = await this.ensureResident(decision, policy, priority, signal);
       const entry = this.residents.get(loaded.model_id)!;
       entry.users++;
       let released = false;
-      return { loaded, backend: entry.backend, release: () => {
+      return { loaded, backend: entry.backend, decision: entry.decision, release: () => {
         if (released) return;
         released = true;
         entry.users--;
@@ -75,6 +76,7 @@ export class DefaultModelManager implements IModelManager {
   }
 
   private async ensureResident(decision: RoutingDecision, policy: ResourcePolicy, priority: number, signal?: AbortSignal): Promise<LoadedModel> {
+    signal?.throwIfAborted();
     const existing = this.residents.get(decision.model_id);
     if (existing) {
       existing.loaded.last_used_at = new Date().toISOString();
@@ -83,7 +85,8 @@ export class DefaultModelManager implements IModelManager {
     }
 
     const entry = this.lookup(decision.model_id);
-    await this.evictResidents(entry.estimated_memory_gb, policy);
+    await this.evictResidents(entry.estimated_memory_gb, policy, signal);
+    signal?.throwIfAborted();
 
     const backend = this.backendFactory();
     try { await backend.load(entry, decision, signal); }
@@ -96,7 +99,7 @@ export class DefaultModelManager implements IModelManager {
       last_used_at: new Date().toISOString(),
       priority,
     };
-    this.residents.set(decision.model_id, { loaded, backend, registryEntry: entry, users: 0, idle: [] });
+    this.residents.set(decision.model_id, { loaded, decision, backend, registryEntry: entry, users: 0, idle: [] });
     return loaded;
   }
 
@@ -104,10 +107,25 @@ export class DefaultModelManager implements IModelManager {
     return this.exclusive(() => this.unloadResident(model_id));
   }
 
-  private async unloadResident(model_id: string): Promise<void> {
+  private async unloadResident(model_id: string, signal?: AbortSignal): Promise<void> {
     const r = this.residents.get(model_id);
     if (!r) return;
-    if (r.users > 0) await new Promise<void>((resolve) => r.idle.push(resolve));
+    if (r.users > 0) await new Promise<void>((resolve, reject) => {
+      const ready = () => {
+        signal?.removeEventListener("abort", cancel);
+        resolve();
+      };
+      const cancel = () => {
+        signal?.removeEventListener("abort", cancel);
+        const index = r.idle.indexOf(ready);
+        if (index !== -1) r.idle.splice(index, 1);
+        reject(signal?.reason);
+      };
+      r.idle.push(ready);
+      signal?.addEventListener("abort", cancel, { once: true });
+      if (signal?.aborted) cancel();
+    });
+    signal?.throwIfAborted();
     await r.backend.unload();
     this.residents.delete(model_id);
   }
@@ -122,6 +140,10 @@ export class DefaultModelManager implements IModelManager {
     return [...this.residents.values()].map((r) => r.loaded);
   }
 
+  residentContext(modelId: string): number | undefined {
+    return this.residents.get(modelId)?.decision.ctx_window;
+  }
+
   /**
    * Priority- and recency-aware, not plain LRU (implementation-spec.md §2.5): a
    * rarely-used-but-cheap agent model is evicted before a frequently-hit autocomplete
@@ -132,11 +154,11 @@ export class DefaultModelManager implements IModelManager {
     return this.exclusive(() => this.evictResidents(requiredGb, policy));
   }
 
-  private async evictResidents(requiredGb: number, policy: ResourcePolicy): Promise<void> {
+  private async evictResidents(requiredGb: number, policy: ResourcePolicy, signal?: AbortSignal): Promise<void> {
     const hardCapOne = policy.memory_budget_gb > 0 && policy.memory_budget_gb < LOW_MEMORY_RESIDENCY_CAP_GB;
 
     if (hardCapOne) {
-      for (const id of [...this.residents.keys()]) await this.unloadResident(id);
+      for (const id of [...this.residents.keys()]) await this.unloadResident(id, signal);
       return;
     }
 
@@ -149,7 +171,7 @@ export class DefaultModelManager implements IModelManager {
     while (this.residentTotalGb() + requiredGb > policy.memory_budget_gb && this.residents.size > 0) {
       const [victim] = rankedForEviction();
       if (!victim) break;
-      await this.unloadResident(victim.loaded.model_id);
+      await this.unloadResident(victim.loaded.model_id, signal);
     }
   }
 

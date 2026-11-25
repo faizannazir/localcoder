@@ -12,6 +12,7 @@ import { runVerify } from "./verify";
 import { runConfig } from "./config";
 import { runPrompt } from "./server-client";
 import { manageBackgroundServer } from "./background-server";
+import { runVscode } from "./vscode";
 
 async function main() {
   const [, , command, ...rest] = process.argv;
@@ -30,6 +31,9 @@ async function main() {
       return;
     case "run":
       await runPrompt(rest);
+      return;
+    case "vscode":
+      await runVscode(rest);
       return;
     case "doctor":
       await runDoctor();
@@ -81,6 +85,7 @@ async function main() {
           "  localcoder start [--port 8080] [--backend llama|mock]",
           "  localcoder status | stop | restart",
           '  localcoder run <id> "<prompt>" [--port <port>]',
+          "  localcoder vscode <id> [<id> ...] [--continue] [--tools] [--port <port>] [--input-tokens <count>]",
           "  localcoder doctor",
           "  localcoder models list [--downloaded]",
           "  localcoder models download <id>",

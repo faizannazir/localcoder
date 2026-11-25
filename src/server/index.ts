@@ -20,6 +20,7 @@ import { handleChatCompletions } from "./routes/chat";
 import { handleCompletions } from "./routes/completions";
 import { handleAgentRun, handleAgentUndo } from "./routes/agent";
 import { CONTROL_ROUTE, handleServerControl, type ServerControl } from "./control";
+import { FoundryLocal } from "../inference/foundry-local";
 
 export interface ServeOptions {
   port?: number;
@@ -28,6 +29,7 @@ export interface ServeOptions {
   repoRoot?: string;
   openWorkspaceIndex?: boolean;
   control?: ServerControl;
+  foundryEndpoint?: string;
   /** Test seam: supply a specific InferenceBackend (e.g. a scripted one in unit tests). */
   backendFactory?: () => import("../types/index").InferenceBackend;
 }
@@ -77,6 +79,7 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 export function buildContext(opts: ServeOptions = {}): AppContext {
+  const foundry = opts.foundryEndpoint === undefined ? undefined : new FoundryLocal(opts.foundryEndpoint);
   const baseDir = opts.baseDir ?? path.join(__dirname, "..", "..");
   const backendChoice = opts.backend ?? (process.env.LOCALCODER_BACKEND === "mock" ? "mock" : "llama");
 
@@ -98,6 +101,7 @@ export function buildContext(opts: ServeOptions = {}): AppContext {
     router: new DefaultModelRouter(),
     modelManager: new DefaultModelManager(registry, backendFactory),
     registry,
+    foundry,
     baseDir,
     repoRoot,
     indexStore,
@@ -123,7 +127,7 @@ export function createServer(ctx: AppContext, security: SecurityOptions = securi
       const method = req.method ?? "GET";
 
       if (method === "GET" && url === "/v1/models") {
-        return await handleModels(undefined, res, ctx);
+        return await handleModels(undefined, res, ctx, cancellation.signal);
       }
       if (method === "POST" && (url === "/v1/models/load" || url === "/v1/models/unload")) {
         return await handleModelResidency(await readJsonBody(req), res, ctx, url.endsWith("/unload") ? "unload" : "load");
@@ -174,6 +178,11 @@ export async function serve(opts: ServeOptions = {}): Promise<{ port: number; cl
   } catch (error) {
     ctx.indexStore?.close();
     throw error;
+  }
+  if (ctx.foundry?.port === (server.address() as import("net").AddressInfo).port) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    ctx.indexStore?.close();
+    throw new Error("Foundry Local and LocalCoder must use different ports.");
   }
 
   return {

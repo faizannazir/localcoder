@@ -1,6 +1,7 @@
 import type { HardwareProfiler, ModelRegistryEntry, PolicyEngine, TaskClassifier, IndexStore, ContextManager } from "../types/index";
 import type { DefaultModelManager } from "../manager/model-manager";
 import type { DefaultModelRouter } from "../router/router";
+import type { FoundryLocal } from "../inference/foundry-local";
 
 export interface AppContext {
   profiler: HardwareProfiler;
@@ -9,6 +10,7 @@ export interface AppContext {
   router: DefaultModelRouter;
   modelManager: DefaultModelManager;
   registry: ModelRegistryEntry[];
+  foundry?: FoundryLocal;
   baseDir: string;
   /** The workspace the agent operates on (isolated per repository). */
   repoRoot: string;

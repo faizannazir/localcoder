@@ -1,5 +1,20 @@
 [
   {
+    "model_id": "qwen3-0.6b-q8-0",
+    "architecture": "dense",
+    "parameter_count": { "total": 0.6 },
+    "quantization": "Q8_0",
+    "file_path": "models/Qwen3-0.6B-Q8_0.gguf",
+    "context_limit": 40960,
+    "backend_requirements": ["cpu", "metal", "cuda", "vulkan"],
+    "estimated_memory_gb": 0.64,
+    "capabilities": ["tool_calling"],
+    "layers": 28,
+    "attention_heads": 16,
+    "kv_heads": 8,
+    "head_dim": 128
+  },
+  {
     "model_id": "qwen2.5-coder-0.5b-q4",
     "architecture": "dense",
     "parameter_count": {
