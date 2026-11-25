@@ -1,6 +1,6 @@
 {
   "name": "localcoder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Hardware-aware local coding assistant with local inference, repository intelligence, and persistent memory",
   "license": "Apache-2.0",
   "bin": {
