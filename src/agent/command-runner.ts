@@ -47,7 +47,7 @@ export function runCommand(argv: string[], cwd: string, opts: { timeout_ms: numb
     const rc = resolveCommand(argv);
     if ("error" in rc) return resolve({ exit_code: null, timed_out: false, output: "", truncated: false, duration_ms: 0, spawn_error: rc.error });
     try {
-      child = spawn(rc.command, rc.args, { cwd, env: safeEnv(), shell: rc.shell, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(rc.command, rc.args, { cwd, env: safeEnv(), shell: rc.shell, detached: process.platform !== "win32", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     } catch (e) {
       return resolve({ exit_code: null, timed_out: false, output: "", truncated: false, duration_ms: 0, spawn_error: (e as Error).message });
     }

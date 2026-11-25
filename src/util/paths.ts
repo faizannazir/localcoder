@@ -36,7 +36,7 @@ export function locateLlamaServer(explicit?: string, env: NodeJS.ProcessEnv = pr
   if (env.LOCALCODER_LLAMA_SERVER_BIN) candidates.push(env.LOCALCODER_LLAMA_SERVER_BIN);
   const inst = installedEnginePath(env);
   if (inst) candidates.push(inst);
-  const w = spawnSync(process.platform === "win32" ? "where" : "which", ["llama-server"], { encoding: "utf8" });
+  const w = spawnSync(process.platform === "win32" ? "where" : "which", ["llama-server"], { encoding: "utf8", windowsHide: true });
   if (w.status === 0) candidates.push(...w.stdout.split(/\r?\n/).filter(Boolean));
   candidates.push(path.resolve(exe), path.resolve("engine", exe));
   for (const c of candidates) {

@@ -54,7 +54,7 @@ export async function runVerify(args: string[]): Promise<void> {
       add("llama-server", "missing", `not found (looked in: ${found.searched.join(", ") || "PATH only"})`);
       missing.push(MISSING_LLAMA);
     } else {
-      const v = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 20_000 });
+      const v = spawnSync(bin, ["--version"], { encoding: "utf8", timeout: 20_000, windowsHide: true });
       const out = `${v.stdout ?? ""}${v.stderr ?? ""}`.trim();
       if (v.error || v.status !== 0) { add("llama-server", "fail", `could not run ${bin}: ${v.error?.message ?? out.slice(0, 300)} (shared libraries must stay next to the binary)`); bin = null; }
       else add("llama-server", "pass", `${bin} — ${out.split("\n").find((l) => /version|build/i.test(l)) ?? out.split("\n")[0]}`);
@@ -174,7 +174,7 @@ export async function runVerify(args: string[]): Promise<void> {
         else if (ev.type === "done") done = ev;
         else if (ev.type === "error") error = ev;
       }
-      const independent = spawnSync("node", ["--test"], { cwd: root, encoding: "utf8", timeout: 60_000 });
+      const independent = spawnSync("node", ["--test"], { cwd: root, encoding: "utf8", timeout: 60_000, windowsHide: true });
       const testsPass = independent.status === 0;
       const seconds = Math.round((Date.now() - started) / 100) / 10;
       const st = session.agent.currentState;

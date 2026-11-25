@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import type { ThermalState, Confidence, GpuBackend } from "../types/index";
 
 export const OS_RESERVE_GB = 1.5;
@@ -19,9 +19,9 @@ export function readBattery(): { present: boolean; on_ac: boolean; percent?: num
     // `wmic` is deprecated but still present on most Windows 10/11 builds as of this
     // writing; if it's gone (stripped Windows 11 builds), this throws and we degrade
     // to "no battery detected" rather than crash.
-    const out = execSync(
-      "wmic path Win32_Battery get EstimatedChargeRemaining,BatteryStatus /format:csv",
-      { stdio: ["ignore", "pipe", "ignore"] }
+    const out = execFileSync(
+      "wmic", ["path", "Win32_Battery", "get", "EstimatedChargeRemaining,BatteryStatus", "/format:csv"],
+      { stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 3000 }
     ).toString();
     const lines = out.split("\n").map((l) => l.trim()).filter(Boolean);
     if (lines.length < 2) return { present: false, on_ac: true };
@@ -41,9 +41,9 @@ export function readBattery(): { present: boolean; on_ac: boolean; percent?: num
 
 export function readGpu(): { backend: GpuBackend; vram_gb?: number } {
   try {
-    const out = execSync(
-      "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits",
-      { stdio: ["ignore", "pipe", "ignore"] }
+    const out = execFileSync(
+      "nvidia-smi", ["--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+      { stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 3000 }
     )
       .toString()
       .trim()

@@ -77,7 +77,7 @@ async function launch(port: number, backend: ServerBackend, workspace: string): 
   let child: ReturnType<typeof fork>;
   try {
     child = fork(require.resolve("./index"), ["serve", "--port", String(port), "--backend", backend], {
-      cwd: workspace, detached: true, stdio: ["ignore", log, log, "ipc"],
+      cwd: workspace, detached: true, windowsHide: true, stdio: ["ignore", log, log, "ipc"],
       env: { ...process.env, [CONTROL_TOKEN_ENV]: controlToken },
     });
   } finally { closeSync(log); }
